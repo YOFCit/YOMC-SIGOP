@@ -12,12 +12,12 @@
       </div>
       {{-- ================= LOGIN ================= --}}
       @if ($viewMode == 'login')
-      @include('Components\loginComponents\LV1')
+      @include('Components.loginComponents.LV1')
       @endif
 
       {{-- ================= RESET ================= --}}
       @if ($viewMode == 'reset')
-      @include('Components\loginComponents\LV2')
+      @include('Components.LoginComponents.LV2')
       @endif
     </div>
   </div>

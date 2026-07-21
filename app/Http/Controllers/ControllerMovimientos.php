@@ -6,6 +6,6 @@ class ControllerMovimientos extends Controller
 {
   public function index()
   {
-    return view('Containers\ConMovimientos');
+    return view('Containers.ConMovimientos');
   }
 }

@@ -6,6 +6,6 @@ class ControllerTiemposmuertos extends Controller
 {
   public function index()
   {
-    return view('Containers\ConTiemposmuertos');
+    return view('Containers.ConTiemposmuertos');
   }
 }

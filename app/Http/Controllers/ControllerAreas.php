@@ -6,6 +6,6 @@ class ControllerAreas extends Controller
 {
   public function index()
   {
-    return view('Containers\ConArea');
+    return view('Containers.ConArea');
   }
 }

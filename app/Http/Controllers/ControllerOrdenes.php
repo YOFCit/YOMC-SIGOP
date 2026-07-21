@@ -6,6 +6,6 @@ class ControllerOrdenes extends Controller
 {
   public function index()
   {
-    return view('Containers\ConOrdenes');
+    return view('Containers.ConOrdenes');
   }
 }

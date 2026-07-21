@@ -8,6 +8,6 @@ class ControllerTiempoextra extends Controller
 {
   public function index()
   {
-    return view('Containers\ConTiempoextra');
+    return view('Containers.ConTiempoextra');
   }
 }

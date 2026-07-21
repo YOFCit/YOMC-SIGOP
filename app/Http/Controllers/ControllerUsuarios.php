@@ -6,6 +6,6 @@ class ControllerUsuarios extends Controller
 {
   public function index()
   {
-    return view('Containers\ConUsuarios');
+    return view('Containers.ConUsuarios');
   }
 }

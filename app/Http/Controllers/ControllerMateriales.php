@@ -6,6 +6,6 @@ class ControllerMateriales extends Controller
 {
   public function index()
   {
-    return view('Containers\ConMateriales');
+    return view('Containers.ConMateriales');
   }
 }
