@@ -1,0 +1,43 @@
+.rounded-3 {
+  border-radius: 0.75rem !important;
+}
+
+.rounded-pill {
+  border-radius: 50rem !important;
+}
+
+.table th {
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  border-bottom-width: 1px;
+}
+
+.table td {
+  vertical-align: middle;
+  font-size: 0.85rem;
+}
+
+.card-header {
+  background-color: #f8f9fa;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+.table-responsive::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
