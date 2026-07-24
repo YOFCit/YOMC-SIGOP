@@ -38,7 +38,7 @@ Route::get('/', [ControllerInicio::class, 'index'])->name('Home');
 //--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´//
 //inicio de sesion publico
 Route::get('/login', function () {
-  return view('Containers\ConLogin');
+  return view('Containers.ConLogin');
 })->middleware('guest')->name('login');
 //--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´//
 

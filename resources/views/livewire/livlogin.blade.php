@@ -21,7 +21,7 @@
 
       {{-- ================= LOGIN ================= --}}
       @if ($viewMode == 'login')
-      @include('Components.loginComponents.LV1')
+      @include('Components.LoginComponents.LV1')
       @endif
 
       {{-- ================= RESET ================= --}}

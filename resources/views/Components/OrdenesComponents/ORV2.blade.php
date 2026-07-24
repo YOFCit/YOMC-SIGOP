@@ -244,6 +244,7 @@
                   @endif
 
                   {{-- Aprobar arranque (Producción) --}}
+                  @auth
                   @if($puedeAprobar)
                   <button class="btn btn-sm btn-outline-primary rounded-circle p-0"
                     style="width: 34px; height: 34px;"
@@ -252,6 +253,7 @@
                     <i class="fas fa-play"></i>
                   </button>
                   @endif
+                  @endauth
 
                   {{-- Ver materiales --}}
                   @if($puedeVerMateriales)

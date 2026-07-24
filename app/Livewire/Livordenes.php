@@ -40,13 +40,13 @@ class Livordenes extends Component
    * ÚNICO LUGAR DONDE SE DEFINEN LOS PERMISOS
    */
   private const PERMISOS = [
-    'crear_orden'       => ['Produccion'],
+    'crear_orden'       => ['Produccion','IT','Calidad'],
     'cerrar_orden'      => ['Mantenimiento','IT'],
     'editar_completo'   => ['IT'],
-    'aprobar_arranque'  => ['Produccion'],
+    'aprobar_arranque'  => ['Produccion','Calidad'],
     'eliminar_orden'    => ['IT'],
     'ver_materiales'    => ['Mantenimiento', 'IT'],
-    'exportar'          => ['Produccion', 'Mantenimiento', 'IT'],
+    'exportar'          => ['Produccion', 'Mantenimiento', 'IT','Calidad'],
   ];
 
   // ============================================================

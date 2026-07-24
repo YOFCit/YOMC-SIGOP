@@ -144,8 +144,8 @@
           <label class="form-label fw-semibold small">Hora Arranque <span class="text-danger">*</span></label>
           <input type="datetime-local" class="form-control rounded-3 @error('HoraArranque') is-invalid @enderror"
             wire:model="HoraArranque"
-            min="{{ $HoraRecepcionLinea }}"
-            max="{{ now()->format('Y-m-d\TH:i') }}">
+            min="{{ now()->format('Y-m-d\TH:i') }}">
+          {{-- Eliminamos el max para permitir fechas futuras --}}
           @error('HoraArranque') <div class="invalid-feedback small">{{ $message }}</div> @enderror
         </div>
 
