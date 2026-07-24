@@ -40,13 +40,13 @@ class Livordenes extends Component
    * ÚNICO LUGAR DONDE SE DEFINEN LOS PERMISOS
    */
   private const PERMISOS = [
-    'crear_orden'       => ['Produccion','IT','Calidad'],
-    'cerrar_orden'      => ['Mantenimiento','IT'],
+    'crear_orden'       => ['Produccion', 'IT', 'Calidad'],
+    'cerrar_orden'      => ['Mantenimiento', 'IT'],
     'editar_completo'   => ['IT'],
-    'aprobar_arranque'  => ['Produccion','Calidad'],
+    'aprobar_arranque'  => ['Produccion', 'Calidad'],
     'eliminar_orden'    => ['IT'],
     'ver_materiales'    => ['Mantenimiento', 'IT'],
-    'exportar'          => ['Produccion', 'Mantenimiento', 'IT','Calidad'],
+    'exportar'          => ['Produccion', 'Mantenimiento', 'IT', 'Calidad'],
   ];
 
   // ============================================================
@@ -621,6 +621,7 @@ class Livordenes extends Component
         'Status'         => 'cerrada',
         'HoraCierre'     => now(),
         'TiempoSolucion' => now(),
+        'Engineer' => auth()->user()?->Nombre ?? 'N/A'
       ]);
       $this->procesarMateriales($orden);
     });
@@ -938,7 +939,7 @@ class Livordenes extends Component
     $template->setValue('area', $orden->area?->Nombre ?? 'N/A');
     $template->setValue('linea', $orden->linea?->Nombre ?? 'N/A');
     $template->setValue('empleado', $orden->empleado?->Nombre ?? 'N/A');
-    $template->setValue('Engineer', auth()->user()?->name ?? 'N/A');
+    $template->setValue('Engineer', $orden->Engineer ?? 'N/A');
     $template->setValue('ParoLinea', $orden->ParoLinea ? 'Si' : 'No');
     $template->setValue('descripcion', $orden->Descripcion ?? '');
     $template->setValue('Procedimiento', $orden->Procedimiento ?? '');

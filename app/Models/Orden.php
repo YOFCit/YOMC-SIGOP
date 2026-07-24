@@ -32,7 +32,8 @@ class Orden extends Model
     // NUEVOS CAMPOS
     'HoraRecepcionLinea',
     'HoraArranque',
-    'DescripcionArranque'
+    'DescripcionArranque',
+    'Engineer'
   ];
 
   protected $casts = [
