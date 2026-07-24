@@ -36,7 +36,7 @@
 
 <body>
 
-  <nav class="navbar navbar-expand-lg">
+  <nav class="navbar navbar-expand-lg py-2">
     <div class="container-fluid px-3 px-lg-4">
       <a class="navbar-brand" href="{{ route('Home') }}">
         <i class="bi bi-grid-3x3-gap-fill"></i> Sistema de control
@@ -50,90 +50,50 @@
           {{-- ADMINISTRADOR --}}
           @if(auth()->check() && auth()->user()->Position === 'Administrador')
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle"
-              href="#"
-              id="adminDropdown"
-              role="button"
-              data-bs-toggle="dropdown"
-              aria-expanded="false">
+            <a class="nav-link dropdown-toggle" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
               <i class="bi bi-shield"></i> Admin
             </a>
-
             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminDropdown">
-              <li>
-                <a class="dropdown-item" href="{{ route('Areas') }}">
-                  <i class="bi bi-diagram-3"></i> Áreas
-                </a>
-              </li>
-
-              <li>
-                <a class="dropdown-item" href="{{ route('Usuarios') }}">
-                  <i class="bi bi-people"></i> Usuarios
-                </a>
-              </li>
-
-              <li>
-                <a class="dropdown-item" href="{{ route('Empleados') }}">
-                  <i class="bi bi-person-badge"></i> Empleados
-                </a>
-              </li>
+              <li><a class="dropdown-item" href="{{ route('Areas') }}"><i class="bi bi-diagram-3"></i> Áreas</a></li>
+              <li><a class="dropdown-item" href="{{ route('Usuarios') }}"><i class="bi bi-people"></i> Usuarios</a></li>
+              <li><a class="dropdown-item" href="{{ route('Empleados') }}"><i class="bi bi-person-badge"></i> Empleados</a></li>
             </ul>
           </li>
           @endif
 
-
           {{-- MATERIALES Y MOVIMIENTOS --}}
           @if(auth()->check() && in_array(auth()->user()->Position, ['Ingeniero', 'Administrador', 'Asistente']))
-
           <li class="nav-item">
-            <a class="nav-link" href="{{ route('Materiales') }}">
-              <i class="bi bi-box"></i> Materiales
-            </a>
+            <a class="nav-link" href="{{ route('Materiales') }}"><i class="bi bi-box"></i> Materiales</a>
           </li>
-
           <li class="nav-item">
-            <a class="nav-link" href="{{ route('Movimientos') }}">
-              <i class="bi bi-arrow-left-right"></i> Movimientos
-            </a>
+            <a class="nav-link" href="{{ route('Movimientos') }}"><i class="bi bi-arrow-left-right"></i> Movimientos</a>
           </li>
-
           @endif
-
 
           {{-- ORDENES --}}
           <li class="nav-item">
-            <a class="nav-link" href="{{ route('Ordenes') }}">
-              <i class="bi bi-clipboard"></i> Órdenes
-            </a>
+            <a class="nav-link" href="{{ route('Ordenes') }}"><i class="bi bi-clipboard"></i> Órdenes</a>
           </li>
-
 
           {{-- TIEMPO EXTRA --}}
           <li class="nav-item">
-            <a class="nav-link" href="{{ route('Tiempoextra') }}">
-              <i class="bi bi-clock"></i> Extra
-            </a>
+            <a class="nav-link" href="{{ route('Tiempoextra') }}"><i class="bi bi-clock"></i> Extra</a>
           </li>
-
 
           {{-- LOGIN --}}
-          @if(Route::is('Home') && !auth()->check())
+          @if(!Route::is('Home') && !auth()->check())
           <li class="nav-item">
-            <a class="nav-link" href="{{ route('login') }}">
-              <i class="bi bi-person-circle"></i> Login
-            </a>
+            <a class="nav-link" href="{{ route('login') }}"><i class="bi bi-person-circle"></i> Login</a>
           </li>
           @endif
-
 
           {{-- LOGOUT --}}
           @if(auth()->check())
           <li class="nav-item">
             <form method="POST" action="{{ route('logout') }}" class="d-inline">
               @csrf
-              <button class="btn btn-link nav-link btn-logout">
-                <i class="bi bi-box-arrow-right"></i> Salir
-              </button>
+              <button class="btn btn-link nav-link btn-logout"><i class="bi bi-box-arrow-right"></i> Salir</button>
             </form>
           </li>
           @endif
@@ -142,19 +102,21 @@
       </div>
     </div>
   </nav>
-  <main>
+
+  <main class="py-3">
     <div class="container-fluid px-3 px-lg-4">
       <livewire:global-alert />
       @yield('datos')
     </div>
   </main>
-  <footer class="footer">
+
+  <footer class="footer py-2">
     <div class="container-fluid px-3 px-lg-4 text-center">
       {{ now()->format('d/m/Y') }} · Sistema de Control
     </div>
   </footer>
-  <script src="{{ asset('js/bootstrap.bundle.min.js') }}"></script>
 
+  <script src="{{ asset('js/bootstrap.bundle.min.js') }}"></script>
   @livewireScripts
   @livewireChartsScripts
 </body>

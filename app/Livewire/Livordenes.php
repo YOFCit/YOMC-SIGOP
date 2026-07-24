@@ -15,39 +15,101 @@ use Illuminate\Support\Facades\DB;
 use App\Exports\OrdenesExport;
 use Maatwebsite\Excel\Facades\Excel;
 use Livewire\WithPagination;
+use Illuminate\Support\Collection;
 
 class Livordenes extends Component
 {
   use WithPagination;
+
   protected $paginationTheme = 'bootstrap';
   public $perPage = 3;
 
-  // CONSTANTES PARA ESTADOS
+  // ============================================================
+  // CONSTANTES CENTRALIZADAS
+  // ============================================================
   private const ESTADOS_VALIDOS = ['abierta', 'en_proceso', 'cerrada'];
+
   private const ESTADOS_LEGIBLES = [
-    'abierta' => 'Abierta',
-    'en_proceso' => 'En proceso',
-    'cerrada' => 'Cerrada'
+    'abierta'     => 'Abierta',
+    'en_proceso'  => 'En proceso',
+    'cerrada'     => 'Cerrada'
   ];
 
-  public $DescripcionArranque;
+  /**
+   * Mapa de permisos: acción => [departamentos permitidos]
+   * ÚNICO LUGAR DONDE SE DEFINEN LOS PERMISOS
+   */
+  private const PERMISOS = [
+    'crear_orden'       => ['Produccion'],
+    'cerrar_orden'      => ['Mantenimiento','IT'],
+    'editar_completo'   => ['IT'],
+    'aprobar_arranque'  => ['Produccion'],
+    'eliminar_orden'    => ['IT'],
+    'ver_materiales'    => ['Mantenimiento', 'IT'],
+    'exportar'          => ['Produccion', 'Mantenimiento', 'IT'],
+  ];
+
+  // ============================================================
+  // PROPIEDADES DEL FORMULARIO (todas agrupadas)
+  // ============================================================
+
+  // --- Campos de producción ---
+  public $Descripcion;
+  public $IdArea;
+  public $IdLinea;
+  public $NumeroEmpleado;
+  public $Maquina;
   public $HoraRecepcionLinea;
   public $HoraArranque;
+  public $DescripcionArranque;
+
+  // --- Campos de mantenimiento ---
+  public $Procedimiento;
+  public $ParoLinea = false;
+  public $TiempoMuerto = 0;
+  public $TiempoSolucion = null;
+  public $ReqMaterial = false;
+  public $Status = 'abierta';
+  public $Tipo = 'correctivo';
+  public $Otro = '';
+
+  // --- Campos calculados/automáticos ---
+  public $Folio;
+  public $HoraApertura;
+  public $HoraCierre;
+  public $Timestamp;
+  public $tiempoTranscurrido;
   public $tiempoEspera = null;
   public $tiempoArranque = null;
+  public $tiempoSolucionCalculado = null;
+
+  // --- Nombres para mostrar ---
+  public $areaNombre = '';
+  public $lineaNombre = '';
+  public $NombreEmpleado = '';
+  public $Engineer;
+
+  // --- Edición ---
+  public $editId = null;
+
+  // --- Búsqueda empleado ---
   public $busquedaEmpleado = '';
   public $empleadosFiltrados = [];
   public $mostrarDropdown = false;
+
+  // --- Materiales ---
+  public $materiales = [];
+  public $materialesSeleccionados = [];
+
+  // --- Modal movimientos ---
   public $showMovimientosModal = false;
   public $movimientosOrden = [];
   public $ordenSeleccionada = null;
-  public $Engineer;
 
-  // EDIT Y CAMPOS AUXILIARES
-  public $editId = null;
+  // ============================================================
+  // FILTROS
+  // ============================================================
   public $search = '';
-
-  // NUEVOS FILTROS
   public $filtroArea = '';
   public $filtroLinea = '';
   public $filtroMaquina = '';
@@ -56,231 +118,241 @@ class Livordenes extends Component
   public $filtroFechaFin = '';
   public $filtroParoLinea = '';
 
-  // NOMBRES PARA MOSTRAR
-  public $areaNombre = '';
-  public $lineaNombre = '';
-  public $NombreEmpleado = '';
-
-  // CAMPOS QUE LLENA Produccion
-  public $tiempoTranscurrido;
-  public $Descripcion;
-  public $IdArea, $IdLinea;
-  public $NumeroEmpleado;
-  public $Maquina;
-
-  // CAMPOS QUE LLENA Mantenimiento
-  public $Procedimiento;
-  public $ParoLinea = false;
-  public $TiempoMuerto = 0;
-  public $TiempoSolucion = null;
-  public $ReqMaterial = false;
-  public $Status = 'abierta';
-  public $tiempoSolucionCalculado = null;
-
-  // CAMPOS AUTOMÁTICOS
-  public $Folio;
-  public $HoraApertura;
-  public $HoraCierre;
-  public $Timestamp;
-
-  // Dependencias
+  // --- Dependencias para selects ---
+  public $areasDisponibles = [];
   public $lineasDisponibles = [];
   public $maquinasDisponibles = [];
-  public $areasDisponibles = [];
   public $lineasFiltro = [];
   public $maquinasFiltro = [];
 
-  // Materiales
-  public $materiales = [];
-  public $materialesSeleccionados = [];
+  // --- Departamento del usuario actual ---
+  public  $departamentoUsuario;
 
-  // Control de departamento
-  public $departamento;
-
-  public $Tipo = 'correctivo';
-  public $Otro = '';
-
-  /**
-   * Obtener el departamento del usuario normalizado
-   */
-  private function getDepartamentoUsuario()
-  {
-    $user = auth()->user();
-
-    if (!$user) {
-      return 'Produccion';
-    }
-    return $user->Departamento ?? 'Produccion';
-  }
+  // ============================================================
+  // CICLO DE VIDA
+  // ============================================================
 
   public function mount()
   {
+    $this->departamentoUsuario = $this->obtenerDepartamentoUsuario();
+    $this->areasDisponibles = $this->cargarAreas();
     $this->materiales = Material::all();
     $this->materialesSeleccionados = [];
     $this->lineasDisponibles = collect();
+    $this->maquinasDisponibles = collect();
+    $this->filtroFechaInicio = now()->subMonth()->format('Y-m-d');
+    $this->filtroFechaFin = now()->format('Y-m-d');
     $this->Maquina = '';
     $this->search = '';
     $this->HoraRecepcionLinea = null;
     $this->HoraArranque = null;
-    // Cargar áreas para filtros
-    $this->areasDisponibles = Area::select('Nombre', DB::raw('MIN(IdArea) as IdArea'))
-      ->groupBy('Nombre')
-      ->get();
-    // Asignar departamento del usuario
-    $this->departamento = $this->getDepartamentoUsuario();
-    if ($this->departamento === 'Produccion') {
-      $this->limpiarCamposMtto();
-    }
   }
 
   public function render()
   {
-    // Construir consulta con filtros
-    $query = Orden::with(['empleado', 'area', 'linea', 'movimientos.material']);
-
-    // Búsqueda general
-    if ($this->search) {
-      $query->where(function ($q) {
-        $q->where('Folio', 'LIKE', "%{$this->search}%")
-          ->orWhere('Descripcion', 'LIKE', "%{$this->search}%")
-          ->orWhere('Maquina', 'LIKE', "%{$this->search}%")
-          ->orWhere('NumeroEmpleado', 'LIKE', "%{$this->search}%");
-      });
-    }
-
-    // Filtros específicos
-    if ($this->filtroArea) {
-      $query->whereHas('area', function ($q) {
-        $q->where('Nombre', $this->filtroArea);
-      });
-    }
-
-    if ($this->filtroLinea) {
-      $query->whereHas('linea', function ($q) {
-        $q->where('Nombre', $this->filtroLinea);
-      });
-    }
-
-    if ($this->filtroMaquina) {
-      $query->where('Maquina', 'LIKE', "%{$this->filtroMaquina}%");
-    }
-
-    if ($this->filtroEstado) {
-      $query->where('Status', $this->filtroEstado);
-    }
-
-    if ($this->filtroParoLinea !== '') {
-      $query->where('ParoLinea', $this->filtroParoLinea);
-    }
-
-    if ($this->filtroFechaInicio) {
-      $query->whereDate('HoraApertura', '>=', Carbon::parse($this->filtroFechaInicio)->startOfDay());
-    }
-
-    if ($this->filtroFechaFin) {
-      $query->whereDate('HoraApertura', '<=', Carbon::parse($this->filtroFechaFin)->endOfDay());
-    }
-
-    $ordenes = $query
-      ->latest('Timestamp')
-      ->paginate($this->perPage);
-
-    // Calcular tiempo de solución para cada orden
-    foreach ($ordenes as $orden) {
-      $orden->tiempo_solucion_calculado = $this->calcularTiempoSolucion($orden);
-    }
-
-    // Estadísticas para mostrar
-    $coleccion = $ordenes->getCollection();
-
-    $stats = [
-      'total' => $ordenes->total(),
-      'abiertas' => $coleccion->where('Status', 'abierta')->count(),
-      'en_proceso' => $coleccion->where('Status', 'en_proceso')->count(),
-      'cerradas' => $coleccion->where('Status', 'cerrada')->count(),
-      'con_paro' => $coleccion->where('ParoLinea', true)->count(),
-      'tiempo_total_muerto' => $coleccion->sum('TiempoMuerto'),
-    ];
-
     return view('livewire.livordenes', [
-      'ordenes' => $ordenes,
-      'empleados' => User::query()
-        ->when($this->busquedaEmpleado, function ($q) {
-          $q->where('Nombre', 'like', "%{$this->busquedaEmpleado}%")
-            ->orWhere('NumeroEmpleado', 'like', "%{$this->busquedaEmpleado}%");
-        })
-        ->limit(3)
-        ->get(),
-      'areas' => Area::select('Nombre', DB::raw('MIN(IdArea) as IdArea'))
-        ->groupBy('Nombre')
-        ->get(),
-      'stats' => $stats,
-      'lineasFiltro' => $this->lineasFiltro,
-      'maquinasFiltro' => $this->maquinasFiltro,
-      'departamentoActual' => $this->departamento,
+      'ordenes'             => $this->obtenerOrdenesPaginadas(),
+      'empleados'           => $this->buscarEmpleados($this->busquedaEmpleado),
+      'areas'               => Area::orderBy('Nombre')->get(),
+      'lineasFiltro'        => $this->cargarLineasFiltro(),
+      'maquinasFiltro'      => $this->cargarMaquinasFiltro(),
+      'stats'               => $this->calcularEstadisticas(),
+      'departamentoActual'  => $this->departamentoUsuario,
     ]);
   }
 
-  // Actualizar líneas cuando cambia el filtro de área
-  public function updatedFiltroArea($value)
-  {
-    if ($value) {
-      $area = Area::where('Nombre', $value)->first();
-      if ($area) {
-        $idsAreas = Area::where('Nombre', $area->Nombre)->pluck('IdArea');
-        $this->lineasFiltro = Linea::whereIn('IdArea', $idsAreas)
-          ->orderBy('Nombre')
-          ->get();
-        $this->filtroLinea = '';
-        $this->maquinasFiltro = [];
-        $this->filtroMaquina = '';
-      }
-    } else {
-      $this->lineasFiltro = [];
-      $this->maquinasFiltro = [];
-      $this->filtroLinea = '';
-      $this->filtroMaquina = '';
-    }
-  }
+    // ============================================================
+    // MÉTODOS DE AUTORIZACIÓN (ÚNICO PUNTO DE CONTROL)
+    // ============================================================
 
-  // Actualizar máquinas cuando cambia el filtro de línea
-  public function updatedFiltroLinea($value)
+  /**
+   * Obtener el departamento del usuario autenticado
+   */
+  private function obtenerDepartamentoUsuario(): string
   {
-    if ($value) {
-      $this->maquinasFiltro = Maquina::where('IdLinea', $value)
-        ->orderBy('Nombre')
-        ->get();
-      $this->filtroMaquina = '';
-    } else {
-      $this->maquinasFiltro = [];
-      $this->filtroMaquina = '';
-    }
-  }
-
-  // Limpiar todos los filtros
-  public function limpiarFiltros()
-  {
-    $this->filtroArea = '';
-    $this->filtroLinea = '';
-    $this->filtroMaquina = '';
-    $this->filtroEstado = '';
-    $this->filtroFechaInicio = '';
-    $this->filtroFechaFin = '';
-    $this->filtroParoLinea = '';
-    $this->lineasFiltro = [];
-    $this->maquinasFiltro = [];
-    $this->search = '';
+    $user = auth()->user();
+    return $user ? ($user->Departamento ?? 'Produccion') : 'Produccion';
   }
 
   /**
-   * Calcular el tiempo de solución restando TiempoSolucion - HoraApertura
-   * Retorna un string con días, horas y minutos
+   * Verificar si el usuario tiene permiso para una acción
    */
-  public function calcularTiempoSolucion($orden)
+  private function tienePermiso(string $accion): bool
+  {
+    return in_array($this->departamentoUsuario, self::PERMISOS[$accion] ?? []);
+  }
+
+  /**
+   * Autorizar o lanzar error
+   */
+  private function autorizar(string $accion, string $mensaje = 'No autorizado'): void
+  {
+    if (!$this->tienePermiso($accion)) {
+      $this->dispatch('showAlert', $mensaje, 'error');
+      throw new \Exception($mensaje);
+    }
+  }
+
+  /**
+   * Verificar si el usuario pertenece a un departamento específico
+   */
+  private function esDepartamento(string $departamento): bool
+  {
+    return $this->obtenerDepartamentoUsuario() === $departamento;
+  }
+
+    // ============================================================
+    // MÉTODOS DE CONSULTA Y FILTRADO
+    // ============================================================
+
+  /**
+   * Construir query base con filtros aplicados
+   */
+  private function queryBase()
+  {
+    $query = Orden::query()->with(['empleado', 'area', 'linea', 'movimientos.material']);
+
+    // Búsqueda general
+    if (!empty($this->search)) {
+      $query->where(function ($q) {
+        $q->where('Folio', 'like', '%' . $this->search . '%')
+          ->orWhere('Descripcion', 'like', '%' . $this->search . '%')
+          ->orWhere('Maquina', 'like', '%' . $this->search . '%')
+          ->orWhere('NumeroEmpleado', 'like', '%' . $this->search . '%')
+          ->orWhereHas('empleado', fn($e) => $e->where('Nombre', 'like', '%' . $this->search . '%'));
+      });
+    }
+
+    // Filtro área
+    if (!empty($this->filtroArea)) {
+      $query->where('IdArea', $this->filtroArea);
+    }
+
+    // Filtro estado
+    if (!empty($this->filtroEstado)) {
+      $query->where('Status', $this->filtroEstado);
+    }
+
+    // Filtro paro de línea
+    if ($this->filtroParoLinea !== '' && $this->filtroParoLinea !== null) {
+      $query->where('ParoLinea', (int) $this->filtroParoLinea);
+    }
+
+    // Filtro fechas
+    if (!empty($this->filtroFechaInicio)) {
+      $query->whereDate('HoraApertura', '>=', $this->filtroFechaInicio);
+    }
+    if (!empty($this->filtroFechaFin)) {
+      $query->whereDate('HoraApertura', '<=', $this->filtroFechaFin);
+    }
+
+    return $query;
+  }
+
+  /**
+   * Obtener órdenes paginadas con tiempo de solución calculado
+   */
+  private function obtenerOrdenesPaginadas()
+  {
+    $ordenes = $this->queryBase()
+      ->orderByDesc('Timestamp')
+      ->paginate($this->perPage);
+
+    $ordenes->getCollection()->transform(function ($orden) {
+      $orden->tiempo_solucion_calculado = $this->calcularTiempoSolucion($orden);
+      return $orden;
+    });
+
+    return $ordenes;
+  }
+
+  /**
+   * Calcular estadísticas basadas en los filtros actuales
+   */
+  private function calcularEstadisticas(): array
+  {
+    $base = $this->queryBase();
+
+    return [
+      'total'              => (clone $base)->count(),
+      'abiertas'           => (clone $base)->where('Status', 'abierta')->count(),
+      'en_proceso'         => (clone $base)->where('Status', 'en_proceso')->count(),
+      'cerradas'           => (clone $base)->where('Status', 'cerrada')->count(),
+      'con_paro'           => (clone $base)->where('ParoLinea', 1)->count(),
+      'tiempo_total_muerto' => (clone $base)->sum('TiempoMuerto'),
+    ];
+  }
+
+  /**
+   * Buscar empleados por nombre o número
+   */
+  private function buscarEmpleados(string $busqueda, int $limite = 5): Collection
+  {
+    return User::query()
+      ->when($busqueda, function ($q) use ($busqueda) {
+        $q->where(function ($sub) use ($busqueda) {
+          $sub->where('Nombre', 'like', "%{$busqueda}%")
+            ->orWhere('NumeroEmpleado', 'like', "%{$busqueda}%");
+        });
+      })
+      ->limit($limite)
+      ->get();
+  }
+
+  /**
+   * Cargar áreas agrupadas para selects
+   */
+  private function cargarAreas(): Collection
+  {
+    return Area::select('Nombre', DB::raw('MIN(IdArea) as IdArea'))
+      ->groupBy('Nombre')
+      ->orderBy('Nombre')
+      ->get();
+  }
+
+  /**
+   * Cargar líneas para el filtro según área seleccionada
+   */
+  private function cargarLineasFiltro(): Collection
+  {
+    if (!$this->filtroArea) {
+      return collect();
+    }
+
+    $area = Area::where('Nombre', $this->filtroArea)->first();
+    if (!$area) {
+      return collect();
+    }
+
+    $idsAreas = Area::where('Nombre', $area->Nombre)->pluck('IdArea');
+    return Linea::whereIn('IdArea', $idsAreas)->orderBy('Nombre')->get();
+  }
+
+  /**
+   * Cargar máquinas para el filtro según línea seleccionada
+   */
+  private function cargarMaquinasFiltro(): Collection
+  {
+    if (!$this->filtroLinea) {
+      return collect();
+    }
+
+    return Maquina::where('IdLinea', $this->filtroLinea)->orderBy('Nombre')->get();
+  }
+
+    // ============================================================
+    // CÁLCULOS DE TIEMPO
+    // ============================================================
+
+  /**
+   * Calcular tiempo de solución (HoraApertura -> TiempoSolucion + TiempoMuerto)
+   */
+  public function calcularTiempoSolucion($orden): string
   {
     if (!$orden->TiempoSolucion || !$orden->HoraApertura) {
       return 'N/A';
     }
+
     try {
       $inicio = Carbon::parse($orden->HoraApertura)->startOfMinute();
       $fin = Carbon::parse($orden->TiempoSolucion)->startOfMinute();
@@ -288,154 +360,73 @@ class Livordenes extends Component
       if ($fin->lt($inicio)) {
         return 'Fecha inválida';
       }
-      // Diferencia total en minutos
-      $minutos = $inicio->diffInMinutes($fin);
 
-      // Sumar tiempo muerto si existe
-      $tiempoMuerto = (int) ($orden->TiempoMuerto ?? 0);
-      $minutos += $tiempoMuerto;
-
-      // Convertir a días, horas y minutos
-      $dias = intdiv($minutos, 1440); // 24 * 60
-      $minutos %= 1440;
-
-      $horas = intdiv($minutos, 60);
-      $minutos %= 60;
-
-      $partes = [];
-
-      if ($dias > 0) {
-        $partes[] = $dias . ' día' . ($dias != 1 ? 's' : '');
-      }
-      if ($horas > 0) {
-        $partes[] = $horas . ' hora' . ($horas != 1 ? 's' : '');
-      }
-      if ($minutos > 0) {
-        $partes[] = $minutos . ' minuto' . ($minutos != 1 ? 's' : '');
-      }
-      if (empty($partes)) {
-        return '0 minutos';
-      }
-      return implode(', ', $partes);
+      $minutosTotales = $inicio->diffInMinutes($fin) + (int) ($orden->TiempoMuerto ?? 0);
+      return $this->formatearMinutos($minutosTotales);
     } catch (\Exception $e) {
       return 'Error en cálculo';
     }
   }
 
-  // CALCULAR TIEMPOS DE ESPERA Y ARRANQUE
-  public function calcularTiempos()
+  /**
+   * Calcular tiempos de espera y arranque
+   */
+  private function calcularTiemposEsperaArranque(): void
   {
+    // Tiempo de espera (recepción - apertura)
+    $this->tiempoEspera = null;
     if ($this->HoraRecepcionLinea && $this->HoraApertura) {
       $recepcion = Carbon::parse($this->HoraRecepcionLinea);
       $apertura = Carbon::parse($this->HoraApertura);
-      $diff = $recepcion->diff($apertura);
-
-      if ($diff->d > 0) {
-        $this->tiempoEspera = "{$diff->d}d {$diff->h}h {$diff->i}m";
-      } elseif ($diff->h > 0) {
-        $this->tiempoEspera = "{$diff->h}h {$diff->i}m";
-      } elseif ($diff->i > 0) {
-        $this->tiempoEspera = "{$diff->i} minutos";
-      } else {
-        $this->tiempoEspera = "{$diff->s} segundos";
-      }
-    } else {
-      $this->tiempoEspera = null;
+      $this->tiempoEspera = $this->calcularDiferenciaLegible($recepcion, $apertura);
     }
 
-    // Calcular tiempo de arranque (arranque - recepción)
+    // Tiempo de arranque (arranque - recepción)
+    $this->tiempoArranque = null;
     if ($this->HoraArranque && $this->HoraRecepcionLinea) {
       $arranque = Carbon::parse($this->HoraArranque);
       $recepcion = Carbon::parse($this->HoraRecepcionLinea);
-
       if ($arranque->gt($recepcion)) {
-        $diff = $recepcion->diff($arranque);
-
-        $this->tiempoArranque = match (true) {
-          $diff->d > 0 => "{$diff->d}d {$diff->h}h {$diff->i}m",
-          $diff->h > 0 => "{$diff->h}h {$diff->i}m",
-          $diff->i > 0 => "{$diff->i} minutos",
-          default => "{$diff->s} segundos"
-        };
-      } else {
-        $this->tiempoArranque = null;
+        $this->tiempoArranque = $this->calcularDiferenciaLegible($recepcion, $arranque);
       }
-    } else {
-      $this->tiempoArranque = null;
     }
   }
 
-  public function updatedHoraRecepcionLinea()
+  /**
+   * Calcular diferencia entre dos fechas y devolver string legible
+   */
+  private function calcularDiferenciaLegible(Carbon $inicio, Carbon $fin): string
   {
-    $this->calcularTiempos();
+    $minutos = $inicio->diffInMinutes($fin);
+    return $this->formatearMinutos($minutos);
   }
 
-  public function updatedHoraArranque()
+  /**
+   * Formatear minutos totales a días, horas, minutos
+   */
+  private function formatearMinutos(int $minutosTotales): string
   {
-    $this->calcularTiempos();
+    $dias = intdiv($minutosTotales, 1440);
+    $minutosTotales %= 1440;
+    $horas = intdiv($minutosTotales, 60);
+    $minutos = $minutosTotales % 60;
+
+    $partes = [];
+    if ($dias > 0)   $partes[] = $dias . ' día' . ($dias != 1 ? 's' : '');
+    if ($horas > 0)  $partes[] = $horas . ' hora' . ($horas != 1 ? 's' : '');
+    if ($minutos > 0) $partes[] = $minutos . ' minuto' . ($minutos != 1 ? 's' : '');
+
+    return empty($partes) ? '0 minutos' : implode(', ', $partes);
   }
 
-  public function updatedHoraApertura()
-  {
-    $this->calcularTiempos();
-  }
-
-  // ÁREA → LÍNEA
-  public function updatedIdArea($value)
-  {
-    if ($value) {
-      $area = Area::find($value);
-      $idsAreas = Area::where('Nombre', $area->Nombre)
-        ->pluck('IdArea');
-      $this->lineasDisponibles = Linea::whereIn('IdArea', $idsAreas)
-        ->get();
-    } else {
-      $this->lineasDisponibles = collect();
-    }
-    $this->IdLinea = null;
-  }
-
-  public function updatedIdLinea($value)
-  {
-    if ($value) {
-      $this->maquinasDisponibles = Maquina::where('IdLinea', $value)
-        ->orderBy('Nombre')
-        ->get();
-    } else {
-      $this->maquinasDisponibles = collect();
-    }
-    $this->Maquina = null;
-  }
-
-  // MATERIAL (solo Mantenimiento e it)
-  public function updatedReqMaterial($value)
-  {
-    if ($this->departamento === 'Produccion') return;
-
-    if ($value && empty($this->materialesSeleccionados)) {
-      $this->addMaterial();
-    } elseif (!$value) {
-      $this->materialesSeleccionados = [];
-    }
-  }
-
-  public function updatedParoLinea($value)
-  {
-    if ($this->departamento === 'Produccion') return;
-
-    if (!$value) {
-      $this->TiempoMuerto = 0;
-      $this->TiempoSolucion = null;
-    }
-  }
-
-  // CALCULAR TIEMPO
-  public function calcularTiempoTranscurrido()
+  /**
+   * Calcular tiempo transcurrido desde apertura
+   */
+  private function actualizarTiempoTranscurrido(): void
   {
     if ($this->HoraApertura && $this->Status !== 'cerrada') {
       $inicio = Carbon::parse($this->HoraApertura);
-      $ahora = Carbon::now();
-      $this->tiempoTranscurrido = $inicio->diffForHumans($ahora, true);
+      $this->tiempoTranscurrido = $inicio->diffForHumans(Carbon::now(), true);
     } elseif ($this->HoraApertura && $this->HoraCierre) {
       $inicio = Carbon::parse($this->HoraApertura);
       $fin = Carbon::parse($this->HoraCierre);
@@ -443,48 +434,41 @@ class Livordenes extends Component
     }
   }
 
-  // CAMBIAR ESTADO (solo Mantenimiento e it)
-  public function cambiarEstado($estado)
+  // ============================================================
+  // MANEJO DE DEPENDENCIAS (ÁREA -> LÍNEA -> MÁQUINA)
+  // ============================================================
+
+  public function updatedIdArea($value)
   {
-    if ($this->departamento === 'Produccion') {
-      $this->dispatch('showAlert', 'Solo Mantenimiento o IT pueden cambiar el estado', 'alert');
-      return;
-    }
-
-    if (!in_array($estado, self::ESTADOS_VALIDOS, true)) {
-      $estadoLegible = self::ESTADOS_LEGIBLES[$estado] ?? $estado;
-      $this->dispatch('showAlert', "El estado \"{$estadoLegible}\" no es válido", 'error');
-      return;
-    }
-
-    $this->Status = $estado;
-
-    if ($estado === 'cerrada' && !$this->HoraCierre) {
-      $this->HoraCierre = Carbon::now()->format('Y-m-d\TH:i');
-      if (!$this->TiempoSolucion) {
-        $this->TiempoSolucion = Carbon::now()->format('Y-m-d\TH:i');
+    if ($value) {
+      $area = Area::find($value);
+      if ($area) {
+        $idsAreas = Area::where('Nombre', $area->Nombre)->pluck('IdArea');
+        $this->lineasDisponibles = Linea::whereIn('IdArea', $idsAreas)->orderBy('Nombre')->get();
       }
-    } elseif ($estado === 'abierta') {
-      $this->HoraCierre = null;
+    } else {
+      $this->lineasDisponibles = collect();
     }
-
-    $this->calcularTiempoTranscurrido();
-
-    $estadoMostrar = self::ESTADOS_LEGIBLES[$estado] ?? ucfirst($estado);
-    $this->dispatch(
-      'showAlert',
-      "Estado cambiado a: {$estadoMostrar}",
-      'success'
-    );
+    $this->reset(['IdLinea', 'Maquina']);
   }
 
-  // MATERIALES
+  public function updatedIdLinea($value)
+  {
+    if ($value) {
+      $this->maquinasDisponibles = Maquina::where('IdLinea', $value)->orderBy('Nombre')->get();
+    } else {
+      $this->maquinasDisponibles = collect();
+    }
+    $this->Maquina = null;
+  }
+
+  // ============================================================
+  // MANEJO DE MATERIALES
+  // ============================================================
+
   public function addMaterial()
   {
-    $this->materialesSeleccionados[] = [
-      'IdMaterial' => null,
-      'CantidadUsada' => 1
-    ];
+    $this->materialesSeleccionados[] = ['IdMaterial' => null, 'CantidadUsada' => 1];
   }
 
   public function removeMaterial($index)
@@ -493,344 +477,541 @@ class Livordenes extends Component
     $this->materialesSeleccionados = array_values($this->materialesSeleccionados);
   }
 
-  // VALIDACIÓN
-  protected function rules()
+  public function updatedReqMaterial($value)
   {
-    if (!$this->editId && $this->departamento === 'Produccion') {
-      return [
-        'Descripcion' => 'required|string',
-        'IdArea' => 'required|exists:areas,IdArea',
-        'IdLinea' => 'required|exists:lineas,IdLinea',
-        'NumeroEmpleado' => 'required|exists:users,NumeroEmpleado',
-        'Maquina' => 'required|string|max:255',
-      ];
+    if (!$this->tienePermiso('cerrar_orden') && !$this->tienePermiso('editar_completo')) {
+      return;
     }
 
-    if (in_array($this->departamento, ['Mantenimiento', 'it']) && $this->editId) {
-      $rules = [
-        'Procedimiento' => 'required|string',
-        'TiempoSolucion' => 'nullable|date|date_format:Y-m-d\TH:i',
-        'Tipo' => 'required|in:correctivo,mejora,instalación,Otro',
-      ];
-
-      // Validación condicional para campo 'Otro'
-      if ($this->Tipo === 'Otro') {
-        $rules['Otro'] = 'required|string|max:255';
-      } else {
-        $rules['Otro'] = 'nullable|string|max:255';
-      }
-
-      if ($this->ParoLinea) {
-        $rules['TiempoMuerto'] = 'required|integer|min:0';
-      } else {
-        $rules['TiempoMuerto'] = 'nullable|integer|min:0';
-      }
-
-      // Validación personalizada para stock de materiales
-      if ($this->ReqMaterial && !empty($this->materialesSeleccionados)) {
-        foreach ($this->materialesSeleccionados as $index => $mat) {
-          if (!empty($mat['IdMaterial']) && !empty($mat['CantidadUsada'])) {
-            $material = Material::find($mat['IdMaterial']);
-            if ($material && $material->Stock < $mat['CantidadUsada']) {
-              $rules["materialesSeleccionados.{$index}.CantidadUsada"] = 'required|integer|min:1';
-              $this->dispatch(
-                'showAlert',
-                "Stock insuficiente para {$material->Nombre}. Disponible: {$material->Stock}",
-                'error'
-              );
-            }
-          }
-        }
-      }
-
-      return $rules;
+    if ($value && empty($this->materialesSeleccionados)) {
+      $this->addMaterial();
+    } elseif (!$value) {
+      $this->materialesSeleccionados = [];
     }
-
-    return [];
   }
 
-  // CREAR ORDEN (solo Produccion )
+  /**
+   * Validar stock disponible para materiales seleccionados
+   */
+  private function validarStockMateriales(): bool
+  {
+    if (!$this->ReqMaterial || empty($this->materialesSeleccionados)) {
+      return true;
+    }
+
+    foreach ($this->materialesSeleccionados as $mat) {
+      if (empty($mat['IdMaterial']) || empty($mat['CantidadUsada'])) {
+        continue;
+      }
+
+      $material = Material::find($mat['IdMaterial']);
+      if ($material && $material->Stock < $mat['CantidadUsada']) {
+        $this->dispatch(
+          'showAlert',
+          "Stock insuficiente para {$material->Nombre}. Disponible: {$material->Stock}",
+          'error'
+        );
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Procesar movimientos de materiales para una orden (crear movimientos y descontar stock)
+   */
+  private function procesarMateriales(Orden $orden): void
+  {
+    if (!$this->ReqMaterial || empty($this->materialesSeleccionados)) {
+      return;
+    }
+
+    DB::transaction(function () use ($orden) {
+      $orden->movimientos()->delete();
+
+      foreach ($this->materialesSeleccionados as $mat) {
+        if (empty($mat['IdMaterial']) || empty($mat['CantidadUsada'])) {
+          continue;
+        }
+
+        $material = Material::find($mat['IdMaterial']);
+        if (!$material || $material->Stock < $mat['CantidadUsada']) {
+          continue;
+        }
+
+        $orden->movimientos()->create([
+          'IdMaterial'    => $mat['IdMaterial'],
+          'CantidadUsada' => $mat['CantidadUsada'],
+          'TipoMovimiento' => 'salida',
+        ]);
+
+        $material->decrement('Stock', $mat['CantidadUsada']);
+      }
+    });
+  }
+
+    // ============================================================
+    // ACCIONES PRINCIPALES (CRUD)
+    // ============================================================
+
+  /**
+   * CREAR ORDEN - Solo Producción
+   */
   public function guardar()
   {
-    if ($this->departamento !== 'Produccion') {
-      $this->dispatch(
-        'showAlert',
-        'Solo producción puede generar órdenes',
-        'error'
-      );
-      return;
-    }
+    $this->autorizar('crear_orden', 'Solo producción puede generar órdenes');
+
     $this->validate([
-      'Descripcion' => 'required|string',
-      'IdArea' => 'required|exists:areas,IdArea',
-      'IdLinea' => 'required|exists:lineas,IdLinea',
-      'NumeroEmpleado' => 'required|exists:empleados,NumeroEmpleado',
-      'Maquina' => 'required|string|max:255',
+      'Descripcion'     => 'required|string',
+      'IdArea'          => 'required|exists:areas,IdArea',
+      'IdLinea'         => 'required|exists:lineas,IdLinea',
+      'NumeroEmpleado'  => 'required|exists:empleados,NumeroEmpleado',
+      'Maquina'         => 'required|string|max:255',
     ]);
+
     $ahora = Carbon::now();
     $folio = $ahora->format('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
-    $data = [
-      'Folio' => $folio,
-      'Descripcion' => $this->Descripcion,
-      'IdArea' => $this->IdArea,
-      'IdLinea' => $this->IdLinea,
-      'NumeroEmpleado' => $this->NumeroEmpleado,
-      'Maquina' => $this->Maquina,
-      'Timestamp' => $ahora,
-      'HoraApertura' => $ahora,
-      'Status' => 'abierta',
-      'Procedimiento' => null,
-      'ParoLinea' => 0,
-      'TiempoMuerto' => 0,
-      'TiempoSolucion' => null,
-      'ReqMaterial' => 0,
-      'HoraCierre' => null,
-      'HoraRecepcionLinea' => $this->HoraRecepcionLinea ? Carbon::parse($this->HoraRecepcionLinea) : null,
-      'HoraArranque' => $this->HoraArranque ? Carbon::parse($this->HoraArranque) : null,
-    ];
-    Orden::create($data);
-    $this->dispatch(
-      'showAlert',
-      "Orden creada. Folio: {$folio}",
-      'success'
-    );
-    $this->limpiar();
+
+    Orden::create([
+      'Folio'               => $folio,
+      'Descripcion'         => $this->Descripcion,
+      'IdArea'              => $this->IdArea,
+      'IdLinea'             => $this->IdLinea,
+      'NumeroEmpleado'      => $this->NumeroEmpleado,
+      'Maquina'             => $this->Maquina,
+      'Timestamp'           => $ahora,
+      'HoraApertura'        => $ahora,
+      'Status'              => 'abierta',
+      'HoraRecepcionLinea'  => $this->HoraRecepcionLinea ? Carbon::parse($this->HoraRecepcionLinea) : null,
+      'HoraArranque'        => $this->HoraArranque ? Carbon::parse($this->HoraArranque) : null,
+    ]);
+
+    $this->dispatch('showAlert', "Orden creada. Folio: {$folio}", 'success');
+    $this->limpiarFormulario();
   }
 
-  // ACTUALIZAR ORDEN (solo Mantenimiento)
-  public function actualizarMtto()
+  /**
+   * CERRAR ORDEN - Solo Mantenimiento
+   */
+  public function cerrarOrden()
   {
-    if ($this->departamento !== 'Mantenimiento' || !$this->editId) {
-      $this->dispatch(
-        'showAlert',
-        'No autorizado',
-        'error'
-      );
+    $this->autorizar('cerrar_orden', 'Solo Mantenimiento puede cerrar órdenes');
+    if (!$this->editId) {
+      $this->dispatch('showAlert', 'No hay una orden seleccionada', 'error');
+      return;
+    }
+    $orden = Orden::findOrFail($this->editId);
+    if ($orden->Status !== 'abierta' && $orden->Status !== 'en_proceso') {
+      $this->dispatch('showAlert', 'Solo puedes cerrar órdenes abiertas', 'error');
+      return;
+    }
+    $this->validarFormularioCierre();
+    if (!$this->validarStockMateriales()) {
+      return;
+    }
+    DB::transaction(function () use ($orden) {
+      $orden->update([
+        'Procedimiento'  => $this->Procedimiento,
+        'Tipo'           => $this->Tipo,
+        'Otro'           => $this->Tipo === 'Otro' ? $this->Otro : null,
+        'ParoLinea'      => $this->ParoLinea ? 1 : 0,
+        'TiempoMuerto'   => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
+        'ReqMaterial'    => $this->ReqMaterial ? 1 : 0,
+        'Status'         => 'cerrada',
+        'HoraCierre'     => now(),
+        'TiempoSolucion' => now(),
+      ]);
+      $this->procesarMateriales($orden);
+    });
+
+    $this->dispatch('showAlert', 'Orden cerrada correctamente', 'success');
+    $this->limpiarFormulario();
+  }
+
+  /**
+   * APROBAR ARRANQUE - Solo Producción/IT
+   */
+  public function aprobarArranque()
+  {
+    $this->autorizar('aprobar_arranque', 'Solo producción o IT pueden aprobar el arranque');
+
+    if (!$this->editId) {
+      $this->dispatch('showAlert', 'No hay una orden seleccionada', 'error');
       return;
     }
 
-    $this->validate();
+    $orden = Orden::findOrFail($this->editId);
+
+    if ($orden->Status !== 'cerrada') {
+      $this->dispatch('showAlert', 'La orden debe estar cerrada para aprobar el arranque', 'error');
+      return;
+    }
+
+    if ($orden->HoraRecepcionLinea) {
+      $this->dispatch('showAlert', 'Esta orden ya tiene arranque aprobado', 'error');
+      return;
+    }
+
+    $this->validate([
+      'HoraRecepcionLinea'  => 'required|date|date_format:Y-m-d\TH:i',
+      'HoraArranque'        => 'required|date|date_format:Y-m-d\TH:i|after:HoraRecepcionLinea',
+      'DescripcionArranque' => 'required|string|max:500',
+    ]);
+
+    $orden->update([
+      'HoraRecepcionLinea'  => Carbon::parse($this->HoraRecepcionLinea),
+      'HoraArranque'        => Carbon::parse($this->HoraArranque),
+      'DescripcionArranque' => $this->DescripcionArranque,
+    ]);
+
+    $this->dispatch('showAlert', 'Arranque aprobado correctamente', 'success');
+    $this->limpiarFormulario();
+  }
+
+  /**
+   * EDITAR ORDEN COMPLETA - Solo IT
+   */
+  public function actualizarMtto()
+  {
+    $this->autorizar('editar_completo', 'No autorizado');
+
+    if (!$this->editId) {
+      $this->dispatch('showAlert', 'No hay una orden seleccionada', 'error');
+      return;
+    }
+
+    $this->validarFormularioCierre();
+
+    if (!$this->validarStockMateriales()) {
+      return;
+    }
 
     DB::transaction(function () {
       $orden = Orden::findOrFail($this->editId);
 
-      // ===============================
-      // ACTUALIZAR DATOS GENERALES
-      // ===============================
       $data = [
-        'Procedimiento' => $this->Procedimiento,
-        'ParoLinea' => $this->ParoLinea ? 1 : 0,
-        'TiempoMuerto' => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
+        'Procedimiento'  => $this->Procedimiento,
+        'ParoLinea'      => $this->ParoLinea ? 1 : 0,
+        'TiempoMuerto'   => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
         'TiempoSolucion' => $this->TiempoSolucion ? Carbon::parse($this->TiempoSolucion) : null,
-        'ReqMaterial' => $this->ReqMaterial ? 1 : 0,
-        'Status' => $this->Status,
-        'Tipo' => $this->Tipo,
-        'Otro' => $this->Tipo === 'Otro' ? $this->Otro : null,
-        'HoraArranque' => $this->HoraArranque ? Carbon::parse($this->HoraArranque) : null,
+        'ReqMaterial'    => $this->ReqMaterial ? 1 : 0,
+        'Status'         => $this->Status,
+        'Tipo'           => $this->Tipo,
+        'Otro'           => $this->Tipo === 'Otro' ? $this->Otro : null,
       ];
 
-      // Si el estado es cerrada
       if ($this->Status === 'cerrada') {
-        // Si no tiene hora de cierre, la establecemos
         if (!$orden->HoraCierre) {
           $data['HoraCierre'] = now();
         }
-
-        // Si no hay tiempo de solución, lo establecemos al momento de cerrar
         if (!$this->TiempoSolucion) {
           $data['TiempoSolucion'] = now();
         }
       }
 
       $orden->update($data);
-
-      // Procesar materiales
-      if ($this->ReqMaterial && !empty($this->materialesSeleccionados)) {
-        // Eliminar movimientos anteriores
-        $orden->movimientos()->delete();
-
-        foreach ($this->materialesSeleccionados as $mat) {
-          if (!empty($mat['IdMaterial']) && !empty($mat['CantidadUsada'])) {
-            // Verificar stock
-            $material = Material::find($mat['IdMaterial']);
-            if ($material && $material->Stock >= $mat['CantidadUsada']) {
-              $orden->movimientos()->create([
-                'IdMaterial' => $mat['IdMaterial'],
-                'CantidadUsada' => $mat['CantidadUsada'],
-                'TipoMovimiento' => 'salida'
-              ]);
-
-              // Actualizar stock
-              $material->Stock -= $mat['CantidadUsada'];
-              $material->save();
-            }
-          }
-        }
-      }
+      $this->procesarMateriales($orden);
     });
-
-    // Calcular el tiempo de solución para mostrar
-    $ordenActualizada = Orden::find($this->editId);
-    $this->tiempoSolucionCalculado = $this->calcularTiempoSolucion($ordenActualizada);
 
     $estadoMostrar = self::ESTADOS_LEGIBLES[$this->Status] ?? ucfirst($this->Status);
-    $this->dispatch(
-      'showAlert',
-      "Orden {$estadoMostrar} correctamente",
-      'success'
-    );
-    $this->limpiar();
+    $this->dispatch('showAlert', "Orden actualizada ({$estadoMostrar})", 'success');
+    $this->limpiarFormulario();
   }
 
-  public function cerrarOrden()
+  /**
+   * ELIMINAR ORDEN - Solo IT
+   */
+  public function eliminar($id)
   {
-    if (!auth()->check()) {
-      $this->dispatch('showAlert', 'Debes iniciar sesión', 'error');
-      return;
-    }
-    if ($this->departamento !== 'Mantenimiento') {
-      $this->dispatch('showAlert', 'Solo Mantenimiento puede cerrar órdenes', 'error');
-      return;
-    }
-    if (!$this->editId) {
-      $this->dispatch('showAlert', 'No hay una orden seleccionada', 'error');
-      return;
-    }
-    $orden = Orden::find($this->editId);
-    if ($orden->Status !== 'abierta') {
-      $this->dispatch('showAlert', 'Solo puedes cerrar órdenes abiertas', 'error');
-      return;
-    }
-    $this->validate([
-      'Procedimiento' => 'required|string|min:10',
-      'Tipo' => 'required|in:correctivo,mejora,instalación,Otro',
-      'ParoLinea' => 'boolean',
-      'TiempoMuerto' => 'required_if:ParoLinea,true|integer|min:0',
-      'ReqMaterial' => 'boolean',
-    ]);
-    if ($this->Tipo === 'Otro') {
-      $this->validate(['Otro' => 'required|string|max:255']);
-    }
-    DB::transaction(function () {
-      $orden = Orden::findOrFail($this->editId);
+    $this->autorizar('eliminar_orden', 'No autorizado');
 
-      $orden->update([
-        'Procedimiento' => $this->Procedimiento,
-        'Tipo' => $this->Tipo,
-        'Otro' => $this->Tipo === 'Otro' ? $this->Otro : null,
-        'ParoLinea' => $this->ParoLinea ? 1 : 0,
-        'TiempoMuerto' => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
-        'ReqMaterial' => $this->ReqMaterial ? 1 : 0,
-        'Status' => 'cerrada',
-        'HoraCierre' => now(),
-        'TiempoSolucion' => now(),
-      ]);
-
-      // Procesar materiales
-      if ($this->ReqMaterial && !empty($this->materialesSeleccionados)) {
-        $orden->movimientos()->delete();
-        foreach ($this->materialesSeleccionados as $mat) {
-          if (!empty($mat['IdMaterial']) && !empty($mat['CantidadUsada'])) {
-            $material = Material::find($mat['IdMaterial']);
-            if ($material && $material->Stock >= $mat['CantidadUsada']) {
-              $orden->movimientos()->create([
-                'IdMaterial' => $mat['IdMaterial'],
-                'CantidadUsada' => $mat['CantidadUsada'],
-                'TipoMovimiento' => 'salida'
-              ]);
-              $material->Stock -= $mat['CantidadUsada'];
-              $material->save();
-            }
-          }
-        }
-      }
-    });
-
-    $this->dispatch('showAlert', 'Orden cerrada correctamente', 'success');
-    $this->limpiar();
+    try {
+      $orden = Orden::findOrFail($id);
+      $folio = $orden->Folio;
+      $orden->delete();
+      $this->dispatch('showAlert', "Orden {$folio} eliminada correctamente", 'success');
+    } catch (\Exception $e) {
+      $this->dispatch('showAlert', 'Error al eliminar la orden', 'error');
+    }
   }
 
+    // ============================================================
+    // CARGA DE ORDEN PARA EDICIÓN
+    // ============================================================
+
+  /**
+   * Cargar orden en el formulario según el departamento
+   */
   public function editar($id)
   {
-    if (!auth()->check()) {
-      $this->dispatch('showAlert', 'Debes iniciar sesión', 'error');
-      return;
-    }
-    $o = Orden::with(['movimientos', 'empleado', 'area', 'linea'])->findOrFail($id);
-    if ($this->departamento === 'Produccion') {
-      if ($o->Status !== 'cerrada') {
-        $this->dispatch('showAlert', 'Solo puedes aprobar arranque en órdenes cerradas', 'error');
-        return;
-      }
-      if ($o->HoraRecepcionLinea) {
-        $this->dispatch('showAlert', 'Esta orden ya tiene arranque aprobado', 'error');
-        return;
-      }
-    } elseif ($this->departamento === 'Mantenimiento') {
-      // Mantenimiento SOLO puede editar órdenes ABIERTAS para cerrarlas
-      if ($o->Status !== 'abierta') {
-        $this->dispatch('showAlert', 'Solo puedes cerrar órdenes abiertas', 'error');
-        return;
-      }
-    } elseif ($this->departamento === 'it') {
-      // IT puede editar cualquier orden
-    } else {
-      $this->dispatch('showAlert', 'No autorizado', 'error');
-      return;
-    }
-    // Cargar datos de la orden
-    $this->editId = $o->IdOrden;
-    $this->Folio = $o->Folio;
-    $this->Descripcion = $o->Descripcion;
-    $this->IdArea = $o->IdArea;
-    $this->IdLinea = $o->IdLinea;
-    $this->areaNombre = $o->area ? $o->area->Nombre : 'N/A';
-    $this->lineaNombre = $o->linea ? $o->linea->Nombre : 'N/A';
-    $this->NombreEmpleado = $o->empleado ? $o->empleado->Nombre : 'N/A';
-    $this->NumeroEmpleado = $o->NumeroEmpleado;
-    $this->Maquina = $o->Maquina;
-    $this->HoraApertura = $o->HoraApertura ? Carbon::parse($o->HoraApertura)->format('Y-m-d\TH:i') : null;
-    $this->Status = $o->Status;
+    $orden = Orden::with(['movimientos', 'empleado', 'area', 'linea'])->findOrFail($id);
 
-    // Cargar campos según departamento
-    if ($this->departamento === 'Produccion') {
-      // Campos para aprobar arranque (orden ya cerrada por mantenimiento)
-      $this->HoraRecepcionLinea = null;
-      $this->HoraArranque = null;
-      $this->DescripcionArranque = '';
-    } elseif ($this->departamento === 'Mantenimiento') {
-      // Campos para cerrar orden (orden abierta)
-      $this->Procedimiento = $o->Procedimiento;
-      $this->ParoLinea = (bool)$o->ParoLinea;
-      $this->TiempoMuerto = $o->TiempoMuerto ?? 0;
-      $this->ReqMaterial = (bool)$o->ReqMaterial;
-      $this->Tipo = $o->Tipo ?? 'correctivo';
-      $this->Otro = $o->Otro ?? '';
+    $this->validarAccesoEdicion($orden);
+    $this->cargarDatosBasicosOrden($orden);
 
-      if ($o->movimientos->count() > 0) {
-        $this->materialesSeleccionados = $o->movimientos->map(function ($m) {
-          return [
-            'IdMaterial' => $m->IdMaterial,
-            'CantidadUsada' => $m->CantidadUsada
-          ];
-        })->toArray();
+    $departamento = $this->obtenerDepartamentoUsuario();
+
+    // Para aprobar arranque: HoraRecepcionLinea = HoraCierre (bloqueado)
+    if (
+      $departamento === 'Produccion' ||
+      ($departamento === 'IT' && $orden->Status === 'cerrada' && !$orden->HoraRecepcionLinea)
+    ) {
+      $this->HoraRecepcionLinea = $orden->HoraCierre
+        ? Carbon::parse($orden->HoraCierre)->format('Y-m-d\TH:i')
+        : null;
+    }
+
+    if ($departamento === 'Mantenimiento' || $departamento === 'IT') {
+      $this->cargarDatosMantenimiento($orden);
+    }
+
+    // Cargar líneas y máquinas sin resetear Maquina
+    if ($this->IdArea) {
+      $area = Area::find($this->IdArea);
+      if ($area) {
+        $idsAreas = Area::where('Nombre', $area->Nombre)->pluck('IdArea');
+        $this->lineasDisponibles = Linea::whereIn('IdArea', $idsAreas)->orderBy('Nombre')->get();
       }
     }
 
-    $this->calcularTiempos();
-    $this->updatedIdArea($o->IdArea);
-    $this->IdLinea = $o->IdLinea;
-    // ============================================
-    // DISPARAR EL MODAL CORRECTO SEGÚN DEPARTAMENTO
-    // ============================================
-    if ($this->departamento === 'Produccion') {
-      $this->dispatch('abrirModalArranque');
-    } elseif ($this->departamento === 'Mantenimiento') {
-      $this->dispatch('abrirModalCerrar');
+    if ($this->IdLinea) {
+      $this->maquinasDisponibles = Maquina::where('IdLinea', $this->IdLinea)->orderBy('Nombre')->get();
+    }
+  }
+  /**
+   * Validar si el usuario puede editar esta orden
+   */
+  private function validarAccesoEdicion(Orden $orden): void
+  {
+    $departamento = $this->obtenerDepartamentoUsuario();
+
+    if ($departamento === 'Produccion') {
+      if ($orden->Status !== 'cerrada') {
+        throw new \Exception('Solo puedes aprobar arranque en órdenes cerradas');
+      }
+      if ($orden->HoraRecepcionLinea) {
+        throw new \Exception('Esta orden ya tiene arranque aprobado');
+      }
+    } elseif ($departamento === 'Mantenimiento') {
+      if ($orden->Status !== 'abierta') {
+        throw new \Exception('Solo puedes cerrar órdenes abiertas');
+      }
     }
   }
 
-  public function limpiar()
+  /**
+   * Cargar datos básicos de la orden
+   */
+  private function cargarDatosBasicosOrden(Orden $orden): void
+  {
+    $this->editId          = $orden->IdOrden;
+    $this->Folio           = $orden->Folio;
+    $this->Descripcion     = $orden->Descripcion;
+    $this->IdArea          = $orden->IdArea;
+    $this->IdLinea         = $orden->IdLinea;
+    $this->areaNombre      = $orden->area?->Nombre ?? 'N/A';
+    $this->lineaNombre     = $orden->linea?->Nombre ?? 'N/A';
+    $this->NombreEmpleado  = $orden->empleado?->Nombre ?? 'N/A';
+    $this->NumeroEmpleado  = $orden->NumeroEmpleado;
+    $this->Maquina         = $orden->Maquina; // Cargar ANTES de actualizar dependencias
+    $this->HoraApertura    = $orden->HoraApertura ? Carbon::parse($orden->HoraApertura)->format('Y-m-d\TH:i') : null;
+    $this->Status          = $orden->Status;
+    $this->HoraCierre      = $orden->HoraCierre ? Carbon::parse($orden->HoraCierre)->format('Y-m-d\TH:i') : null;
+  }
+
+  /**
+   * Cargar datos específicos de mantenimiento
+   */
+  private function cargarDatosMantenimiento(Orden $orden): void
+  {
+    $this->Procedimiento = $orden->Procedimiento;
+    $this->ParoLinea     = (bool) $orden->ParoLinea;
+    $this->TiempoMuerto  = $orden->TiempoMuerto ?? 0;
+    $this->ReqMaterial   = (bool) $orden->ReqMaterial;
+    $this->Tipo          = $orden->Tipo ?? 'correctivo';
+    $this->Otro          = $orden->Otro ?? '';
+
+    if ($orden->movimientos->count() > 0) {
+      $this->materialesSeleccionados = $orden->movimientos->map(function ($m) {
+        return [
+          'IdMaterial'    => $m->IdMaterial,
+          'CantidadUsada' => $m->CantidadUsada,
+        ];
+      })->toArray();
+    }
+  }
+
+  /**
+   * Disparar el modal correcto según departamento
+   */
+  private function dispatchModalEdicion(): void
+  {
+    if ($this->esDepartamento('Produccion')) {
+      $this->dispatch('abrirModalArranque');
+    } elseif ($this->esDepartamento('Mantenimiento')) {
+      $this->dispatch('abrirModalCerrar');
+    } elseif ($this->esDepartamento('IT')) {
+      $orden = Orden::find($this->editId);
+      if ($orden && $orden->Status === 'cerrada' && !$orden->HoraRecepcionLinea) {
+        $this->dispatch('abrirModalArranque');
+      } else {
+        $this->dispatch('abrirModalEditar');
+      }
+    }
+  }
+
+    // ============================================================
+    // VALIDACIONES
+    // ============================================================
+
+  /**
+   * Validar formulario de cierre/edición
+   */
+  private function validarFormularioCierre(): void
+  {
+    $rules = [
+      'Procedimiento' => 'required|string|min:10',
+      'Tipo'          => 'required|in:correctivo,mejora,instalación,Otro',
+    ];
+
+    if ($this->Tipo === 'Otro') {
+      $rules['Otro'] = 'required|string|max:255';
+    }
+
+    if ($this->ParoLinea) {
+      $rules['TiempoMuerto'] = 'required|integer|min:0';
+    }
+
+    $this->validate($rules);
+  }
+
+    // ============================================================
+    // EXPORTACIONES
+    // ============================================================
+
+  /**
+   * Exportar a Excel
+   */
+  public function exportarExcel()
+  {
+    $this->autorizar('exportar', 'No tienes permiso para exportar');
+
+    return Excel::download(
+      new OrdenesExport($this->queryBase()),
+      'Ordenes_' . now()->format('Y-m-d_H-i') . '.xlsx'
+    );
+  }
+
+  /**
+   * Exportar a PDF (Word)
+   */
+  public function exportarPDF($id)
+  {
+    $this->autorizar('exportar', 'No tienes permiso para exportar');
+
+    $orden = Orden::with(['empleado', 'area', 'linea', 'movimientos.material'])->findOrFail($id);
+
+    $templatePath = public_path('templates/Orden.docx');
+    if (!file_exists($templatePath)) {
+      abort(404, 'Plantilla no encontrada');
+    }
+
+    $template = new TemplateProcessor($templatePath);
+    $this->llenarPlantillaWord($template, $orden);
+
+    $fileName = "Orden_{$orden->Folio}.docx";
+    $filePath = storage_path("app/{$fileName}");
+    $template->saveAs($filePath);
+
+    return response()->download($filePath)->deleteFileAfterSend(true);
+  }
+
+  /**
+   * Llenar plantilla Word con datos de la orden
+   */
+  private function llenarPlantillaWord(TemplateProcessor $template, Orden $orden): void
+  {
+    // Datos generales
+    $template->setValue('folio', $orden->Folio);
+    $template->setValue('maquina', $orden->Maquina ?? '');
+    $template->setValue('area', $orden->area?->Nombre ?? 'N/A');
+    $template->setValue('linea', $orden->linea?->Nombre ?? 'N/A');
+    $template->setValue('empleado', $orden->empleado?->Nombre ?? 'N/A');
+    $template->setValue('Engineer', auth()->user()?->name ?? 'N/A');
+    $template->setValue('ParoLinea', $orden->ParoLinea ? 'Si' : 'No');
+    $template->setValue('descripcion', $orden->Descripcion ?? '');
+    $template->setValue('Procedimiento', $orden->Procedimiento ?? '');
+    $template->setValue('TiempoSolucionCalculado', $this->calcularTiempoSolucion($orden));
+    $template->setValue('TiempoMuerto', $orden->TiempoMuerto ?? 0);
+
+    // Fechas
+    $template->setValue('HoraApertura', $orden->HoraApertura ? Carbon::parse($orden->HoraApertura)->format('d/m/Y H:i') : '');
+    $template->setValue('HoraCierre', $orden->HoraCierre ? Carbon::parse($orden->HoraCierre)->format('d/m/Y H:i') : '');
+    $template->setValue('TiempoSolucion', $orden->TiempoSolucion ? Carbon::parse($orden->TiempoSolucion)->format('d/m/Y H:i') : 'N/A');
+    $template->setValue('HoraFinCalculada', $orden->TiempoSolucion ? Carbon::parse($orden->TiempoSolucion)->format('d/m/Y H:i') : '');
+
+    // Tipo de orden (checkboxes)
+    foreach (['correctivo', 'mejora', 'instalación', 'Otro'] as $tipo) {
+      $template->setValue($tipo, $orden->Tipo === $tipo ? '✔' : '');
+    }
+    $template->setValue('Otrodesc', $orden->Otro ?? 'N/A');
+
+    // Materiales
+    $movimientos = $orden->movimientos;
+    $template->cloneRow('material', max(1, $movimientos->count()));
+
+    if ($movimientos->count() > 0) {
+      foreach ($movimientos as $i => $mov) {
+        $idx = $i + 1;
+        $template->setValue("material#{$idx}", $mov->material?->Nombre ?? 'N/A');
+        $template->setValue("descripcionmat#{$idx}", $mov->material?->Descripcion ?? '');
+        $template->setValue("cantidad#{$idx}", $mov->CantidadUsada ?? 0);
+      }
+    } else {
+      $template->setValue('material#1', 'Sin materiales');
+      $template->setValue('descripcionmat#1', '');
+      $template->setValue('cantidad#1', '');
+    }
+  }
+
+  // ============================================================
+  // MODAL DE MOVIMIENTOS
+  // ============================================================
+
+  public function verMovimientos($id)
+  {
+    $orden = Orden::with('movimientos.material')->find($id);
+
+    $this->ordenSeleccionada = $orden;
+    $this->movimientosOrden = $orden->movimientos->map(function ($mov) {
+      return [
+        'id'       => $mov->IdMovimiento,
+        'material' => $mov->material?->Nombre ?? 'N/A',
+        'cantidad' => $mov->CantidadUsada,
+        'tipo'     => $mov->TipoMovimiento,
+        'fecha'    => $mov->created_at?->format('d/m/Y H:i:s') ?? 'N/A',
+      ];
+    })->toArray();
+
+    $this->showMovimientosModal = true;
+  }
+
+  public function cerrarModalMovimientos()
+  {
+    $this->showMovimientosModal = false;
+    $this->movimientosOrden = [];
+    $this->ordenSeleccionada = null;
+  }
+
+    // ============================================================
+    // UTILIDADES
+    // ============================================================
+
+  /**
+   * Limpiar completamente el formulario
+   */
+  public function limpiarFormulario()
   {
     $this->reset([
       'editId',
@@ -851,233 +1032,27 @@ class Livordenes extends Component
       'Otro',
       'HoraRecepcionLinea',
       'HoraArranque',
+      'DescripcionArranque',
       'tiempoEspera',
       'tiempoArranque',
-      'tiempoSolucionCalculado'
+      'tiempoSolucionCalculado',
+      'tiempoTranscurrido',
+      'HoraCierre',
     ]);
 
     $this->lineasDisponibles = collect();
+    $this->maquinasDisponibles = collect();
     $this->materialesSeleccionados = [];
     $this->ReqMaterial = false;
     $this->ParoLinea = false;
-    $this->HoraCierre = null;
-    $this->tiempoTranscurrido = null;
-    $this->IdArea = null;
-    $this->IdLinea = null;
-    $this->NumeroEmpleado = null;
-    $this->Maquina = '';
-    $this->Procedimiento = '';
-    $this->Descripcion = '';
     $this->Tipo = 'correctivo';
     $this->Otro = '';
-    $this->TiempoSolucion = null;
-    $this->tiempoSolucionCalculado = null;
-
-    if ($this->departamento !== 'Mantenimiento') {
-      $this->limpiarCamposMtto();
-    }
+    $this->Status = 'abierta';
   }
 
-  private function limpiarCamposMtto()
-  {
-    $this->Procedimiento = '';
-    $this->ParoLinea = false;
-    $this->TiempoMuerto = 0;
-    $this->TiempoSolucion = null;
-    $this->ReqMaterial = false;
-    $this->materialesSeleccionados = [];
-    $this->tiempoSolucionCalculado = null;
-  }
-
-  public function verMovimientos($id)
-  {
-    $orden = Orden::with('movimientos.material')->find($id);
-
-    $this->ordenSeleccionada = $orden;
-    $this->movimientosOrden = $orden->movimientos->map(function ($mov) {
-      return [
-        'id' => $mov->IdMovimiento,
-        'material' => $mov->material ? $mov->material->Nombre : 'N/A',
-        'cantidad' => $mov->CantidadUsada,
-        'tipo' => $mov->TipoMovimiento,
-        'fecha' => $mov->created_at ? $mov->created_at->format('d/m/Y H:i:s') : 'N/A'
-      ];
-    })->toArray();
-    $this->showMovimientosModal = true;
-  }
-
-  public function cerrarModalMovimientos()
-  {
-    $this->showMovimientosModal = false;
-    $this->movimientosOrden = [];
-    $this->ordenSeleccionada = null;
-  }
-
-  public function updatedTipo($value)
-  {
-    if ($value !== 'Otro') {
-      $this->Otro = '';
-    }
-  }
-
-  public function exportarPDF($id)
-  {
-    $orden = Orden::with(['empleado', 'area', 'linea', 'movimientos.material'])
-      ->findOrFail($id);
-    $templatePath = public_path('templates/Orden.docx');
-    if (!file_exists($templatePath)) {
-      abort(404, 'Plantilla no encontrada');
-    }
-    $template = new TemplateProcessor($templatePath);
-    // ===============================
-    // DATOS GENERALES
-    // ===============================
-    $template->setValue('folio', $orden->Folio);
-    $template->setValue('maquina', $orden->Maquina ?? '');
-    $template->setValue('area', $orden->area->Nombre ?? 'N/A');
-    $template->setValue('linea', $orden->linea->Nombre ?? 'N/A');
-    $template->setValue('empleado', $orden->empleado->Nombre ?? 'N/A');
-    $template->setValue('Engineer', auth()->user()->name ?? 'N/A');
-    $template->setValue('ParoLinea', $orden->ParoLinea ? 'Si' : 'No');
-    $template->setValue('descripcion', $orden->Descripcion ?? '');
-    $template->setValue('Procedimiento', $orden->Procedimiento ?? '');
-
-    // ===============================
-    // FECHAS
-    // ===============================
-    $horaApertura = $orden->HoraApertura ? Carbon::parse($orden->HoraApertura) : null;
-    $horaCierre   = $orden->HoraCierre ? Carbon::parse($orden->HoraCierre) : null;
-    $tiempoSolucion = $orden->TiempoSolucion ? Carbon::parse($orden->TiempoSolucion) : null;
-    $template->setValue('HoraApertura', $horaApertura ? $horaApertura->format('d/m/Y H:i') : '');
-    $template->setValue('HoraCierre', $horaCierre ? $horaCierre->format('d/m/Y H:i') : '');
-    $template->setValue('TiempoSolucion', $tiempoSolucion ? $tiempoSolucion->format('d/m/Y H:i') : 'N/A');
-
-    // ===============================
-    // TIEMPO DE SOLUCIÓN CALCULADO (Días, Horas, Minutos)
-    // ===============================
-    $tiempoSolucionCalculado = $this->calcularTiempoSolucion($orden);
-    $template->setValue('TiempoSolucionCalculado', $tiempoSolucionCalculado);
-
-    // ===============================
-    // TIEMPOS
-    // ===============================
-    $template->setValue('TiempoMuerto', $orden->TiempoMuerto ?? 0);
-    if ($horaApertura) {
-      $tiempoMuerto = $orden->ParoLinea ? ($orden->TiempoMuerto ?? 0) : 0;
-      $horaFin = $tiempoSolucion;
-      $template->setValue('HoraFinCalculada', $horaFin->format('d/m/Y H:i'));
-    } else {
-      $template->setValue('HoraFinCalculada', '');
-    }
-
-    // ===============================
-    // TIPO DE ORDEN (CHECKS)
-    // ===============================
-    collect(['correctivo', 'mejora', 'instalación', 'Otro'])
-      ->each(function ($t) use ($template, $orden) {
-        $template->setValue($t, $orden->Tipo === $t ? '✔' : '');
-      });
-    $template->setValue('Otrodesc', $orden->Otro ?? 'N/A');
-
-    // ===============================
-    // MATERIALES (TABLA DINÁMICA)
-    // ===============================
-    $movimientos = $orden->movimientos;
-    $template->cloneRow('material', max(1, $movimientos->count()));
-    if ($movimientos->count()) {
-      foreach ($movimientos as $i => $mov) {
-        $index = $i + 1;
-        $template->setValue("material#{$index}", $mov->material->Nombre ?? 'N/A');
-        $template->setValue("descripcionmat#{$index}", $mov->material->Descripcion ?? '');
-        $template->setValue("cantidad#{$index}", $mov->CantidadUsada ?? 0);
-      }
-    } else {
-      $template->setValue('material#1', 'Sin materiales');
-      $template->setValue('descripcionmat#1', '');
-      $template->setValue('cantidad#1', '');
-    }
-
-    // ===============================
-    // GUARDAR Y DESCARGAR
-    // ===============================
-    $fileName = "Orden_{$orden->Folio}.docx";
-    $filePath = storage_path("app/{$fileName}");
-    $template->saveAs($filePath);
-    return response()->download($filePath)->deleteFileAfterSend(true);
-  }
-
-  public function exportarExcel()
-  {
-    // Construir consulta con los mismos filtros que la vista
-    $query = Orden::with(['empleado', 'area', 'linea', 'movimientos.material']);
-
-    // Búsqueda general
-    if ($this->search) {
-      $query->where(function ($q) {
-        $q->where('Folio', 'LIKE', "%{$this->search}%")
-          ->orWhere('Descripcion', 'LIKE', "%{$this->search}%")
-          ->orWhere('Maquina', 'LIKE', "%{$this->search}%")
-          ->orWhere('NumeroEmpleado', 'LIKE', "%{$this->search}%");
-      });
-    }
-
-    // Filtros específicos
-    if ($this->filtroArea) {
-      $query->whereHas('area', function ($q) {
-        $q->where('Nombre', $this->filtroArea);
-      });
-    }
-
-    if ($this->filtroLinea) {
-      $query->whereHas('linea', function ($q) {
-        $q->where('Nombre', $this->filtroLinea);
-      });
-    }
-
-    if ($this->filtroMaquina) {
-      $query->where('Maquina', 'LIKE', "%{$this->filtroMaquina}%");
-    }
-
-    if ($this->filtroEstado) {
-      $query->where('Status', $this->filtroEstado);
-    }
-
-    if ($this->filtroParoLinea !== '') {
-      $query->where('ParoLinea', $this->filtroParoLinea);
-    }
-
-    if ($this->filtroFechaInicio) {
-      $query->whereDate('HoraApertura', '>=', Carbon::parse($this->filtroFechaInicio)->startOfDay());
-    }
-
-    if ($this->filtroFechaFin) {
-      $query->whereDate('HoraApertura', '<=', Carbon::parse($this->filtroFechaFin)->endOfDay());
-    }
-
-    return Excel::download(
-      new OrdenesExport($query),
-      'Ordenes_Filtradas_' . Carbon::now()->format('Y-m-d_H-i') . '.xlsx'
-    );
-  }
-
-  public function updatedBusquedaEmpleado()
-  {
-    $this->mostrarDropdown = true;
-
-    $this->empleadosFiltrados = User::query()
-      ->where(function ($q) {
-        $q->where('Nombre', 'like', "%{$this->busquedaEmpleado}%")
-          ->orWhere('NumeroEmpleado', 'like', "%{$this->busquedaEmpleado}%");
-      })
-      ->limit(5)
-      ->get()
-      ->toArray();
-
-    if (empty($this->empleadosFiltrados)) {
-      $this->empleadosFiltrados = User::limit(5)->get()->toArray();
-    }
-  }
-
+  /**
+   * Seleccionar empleado del dropdown
+   */
   public function seleccionarEmpleado($numero, $nombre)
   {
     $this->NumeroEmpleado = $numero;
@@ -1085,83 +1060,107 @@ class Livordenes extends Component
     $this->mostrarDropdown = false;
   }
 
-  public function aprobarArranque()
+  /**
+   * Actualizar búsqueda de empleados
+   */
+  public function updatedBusquedaEmpleado()
   {
-    if (!auth()->check()) {
-      $this->dispatch('showAlert', 'Debes iniciar sesión', 'error');
-      return;
-    }
+    $this->mostrarDropdown = true;
+    $this->empleadosFiltrados = $this->buscarEmpleados($this->busquedaEmpleado)->toArray();
+  }
 
-    // SOLO Produccion puede aprobar arranque
-    if ($this->departamento !== 'Produccion') {
-      $this->dispatch('showAlert', 'Solo producción puede aprobar el arranque', 'error');
-      return;
-    }
-
-    if (!$this->editId) {
-      $this->dispatch('showAlert', 'No hay una orden seleccionada', 'error');
-      return;
-    }
-
-    // Verificar que la orden esté cerrada
-    $orden = Orden::find($this->editId);
-    if ($orden->Status !== 'cerrada') {
-      $this->dispatch('showAlert', 'La orden debe estar cerrada para aprobar el arranque', 'error');
-      return;
-    }
-
-    if ($orden->HoraRecepcionLinea) {
-      $this->dispatch('showAlert', 'Esta orden ya tiene arranque aprobado', 'error');
-      return;
-    }
-
-    $this->validate([
-      'HoraRecepcionLinea' => 'required|date|date_format:Y-m-d\TH:i',
-      'HoraArranque' => 'required|date|date_format:Y-m-d\TH:i|after:HoraRecepcionLinea',
-      'DescripcionArranque' => 'required|string|max:500',
-    ]);
-
-    try {
-      DB::transaction(function () {
-        $orden = Orden::findOrFail($this->editId);
-        $orden->update([
-          'HoraRecepcionLinea' => Carbon::parse($this->HoraRecepcionLinea),
-          'HoraArranque' => Carbon::parse($this->HoraArranque),
-          'DescripcionArranque' => $this->DescripcionArranque,
-          // La orden ya está cerrada por mantenimiento, no cambiamos el status
-        ]);
-      });
-
-      $this->dispatch('showAlert', 'Arranque aprobado correctamente', 'success');
-      $this->limpiar();
-    } catch (\Exception $e) {
-      $this->dispatch('showAlert', 'Error: ' . $e->getMessage(), 'error');
+  /**
+   * Manejar cambio de tipo de mantenimiento
+   */
+  public function updatedTipo($value)
+  {
+    if ($value !== 'Otro') {
+      $this->Otro = '';
     }
   }
 
-  public function eliminar($id)
+  /**
+   * Manejar cambio de paro de línea
+   */
+  public function updatedParoLinea($value)
   {
-    if ($this->departamento !== 'it') {
-      $this->dispatch('showAlert', 'No autorizado', 'error');
+    if ($this->esDepartamento('Produccion')) {
       return;
     }
 
-    try {
-      $orden = Orden::findOrFail($id);
-      $folio = $orden->Folio;
-      $orden->delete();
-
-      $this->dispatch(
-        'showAlert',
-        "Orden {$folio} eliminada correctamente",
-        'success'
-      );
-    } catch (\Exception $e) {
-      $this->dispatch(
-        'showAlert',
-        'Error al eliminar la orden',
-        'error'
-      );
+    if (!$value) {
+      $this->TiempoMuerto = 0;
+      $this->TiempoSolucion = null;
     }
+  }
+
+  /**
+   * Calcular tiempos cuando cambian horas
+   */
+  public function updatedHoraRecepcionLinea()
+  {
+    $this->calcularTiemposEsperaArranque();
+  }
+
+  public function updatedHoraArranque()
+  {
+    $this->calcularTiemposEsperaArranque();
+  }
+
+  public function updatedHoraApertura()
+  {
+    $this->calcularTiemposEsperaArranque();
+  }
+
+  /**
+   * Limpiar todos los filtros
+   */
+  public function limpiarFiltros()
+  {
+    $this->reset([
+      'filtroArea',
+      'filtroLinea',
+      'filtroMaquina',
+      'filtroEstado',
+      'filtroFechaInicio',
+      'filtroFechaFin',
+      'filtroParoLinea',
+      'search',
+    ]);
+    $this->lineasFiltro = [];
+    $this->maquinasFiltro = [];
+  }
+
+  /**
+   * Actualizar líneas del filtro
+   */
+  public function updatedFiltroArea($value)
+  {
+    if ($value) {
+      $this->lineasFiltro = $this->cargarLineasFiltro();
+      $this->reset(['filtroLinea', 'filtroMaquina', 'maquinasFiltro']);
+    } else {
+      $this->reset(['lineasFiltro', 'maquinasFiltro', 'filtroLinea', 'filtroMaquina']);
+    }
+  }
+
+  /**
+   * Actualizar máquinas del filtro
+   */
+  public function updatedFiltroLinea($value)
+  {
+    if ($value) {
+      $this->maquinasFiltro = $this->cargarMaquinasFiltro();
+      $this->filtroMaquina = '';
+    } else {
+      $this->maquinasFiltro = [];
+      $this->filtroMaquina = '';
+    }
+  }
+
+  public function cambiarEstadoOrden($id, $estado)
+  {
+    $orden = Orden::findOrFail($id);
+    $orden->update(['Status' => $estado]);
   }
 }

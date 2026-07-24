@@ -23,8 +23,8 @@ class LivInicio extends Component
   //=========================
   // KPIs TIEMPOS MUERTOS
   //=========================
-  public int $totalTiempoMuerto = 0;
-  public int $tiempoMuertoMes = 0;
+  public float $totalTiempoMuerto = 0;
+  public float $tiempoMuertoMes = 0;
   public array $tiemposMuertosPorMes = [];
 
   //=========================
@@ -35,19 +35,12 @@ class LivInicio extends Component
   public int $misOrdenesProceso = 0;
   public int $misOrdenesCerradas = 0;
 
-  // Variables para almacenar los modelos de gráficas
-  protected $estadoChartModel;
-  protected $areaChartModel;
-  protected $mesChartModel;
-  protected $tiemposMuertosChartModel;
-
   // Estado de carga
   public bool $cargando = true;
 
   public function mount()
   {
     $this->cargarDashboard();
-    $this->inicializarGraficas();
     $this->cargando = false;
   }
 
@@ -69,11 +62,8 @@ class LivInicio extends Component
   public function cargarDashboard()
   {
     $user = auth()->user();
-    if (!$user) {
-      return;
-    }
 
-    if ($this->esVistaAdministrador()) {
+    if ($this->esVistaAdministrador() || !$user) {
       $this->cargarAdministrador();
       $this->cargarTiemposMuertos();
     } else {
@@ -109,12 +99,12 @@ class LivInicio extends Component
   {
     try {
       // Total de tiempos muertos (suma de todas las órdenes)
-      $this->totalTiempoMuerto = (int) (Orden::sum('TiempoMuerto') ?? 0)/60;
+      $this->totalTiempoMuerto = round(((float) (Orden::sum('TiempoMuerto') ?? 0)) / 60, 1);
 
       // Tiempo muerto del mes actual
-      $this->tiempoMuertoMes = (int) (Orden::whereMonth('Timestamp', now()->month)
+      $this->tiempoMuertoMes = round(((float) (Orden::whereMonth('Timestamp', now()->month)
         ->whereYear('Timestamp', now()->year)
-        ->sum('TiempoMuerto') ?? 0)/60;
+        ->sum('TiempoMuerto') ?? 0)) / 60, 1);
 
       // Tiempos muertos por mes (últimos 12 meses)
       $this->tiemposMuertosPorMes = [];
@@ -126,15 +116,6 @@ class LivInicio extends Component
 
         $this->tiemposMuertosPorMes[$fecha->format('M Y')] = $total;
       }
-
-      // DEBUG: Descomenta para verificar los datos
-      // dd([
-      //     'total' => $this->totalTiempoMuerto,
-      //     'mes_actual' => $this->tiempoMuertoMes,
-      //     'por_mes' => $this->tiemposMuertosPorMes,
-      //     'ordenes_con_tiempo' => Orden::where('TiempoMuerto', '>', 0)->count()
-      // ]);
-
     } catch (\Throwable $e) {
       Log::error('LivInicio::cargarTiemposMuertos - ' . $e->getMessage());
       $this->totalTiempoMuerto = 0;
@@ -166,16 +147,6 @@ class LivInicio extends Component
       $this->misOrdenesAbiertas = 0;
       $this->misOrdenesProceso = 0;
       $this->misOrdenesCerradas = 0;
-    }
-  }
-
-  private function inicializarGraficas()
-  {
-    if ($this->esVistaAdministrador()) {
-      $this->estadoChartModel = $this->estadoChart();
-      $this->areaChartModel = $this->areaChart();
-      $this->mesChartModel = $this->mesChart();
-      $this->tiemposMuertosChartModel = $this->tiemposMuertosChart();
     }
   }
 
@@ -301,19 +272,20 @@ class LivInicio extends Component
   {
     $this->cargando = true;
     $this->cargarDashboard();
-    $this->inicializarGraficas();
     $this->cargando = false;
     $this->dispatch('dashboard-actualizado');
   }
 
   public function render()
   {
+    $esAdmin = $this->esVistaAdministrador() || !auth()->check();
+
     return view('livewire.liv-inicio', [
-      'estadoChart' => $this->estadoChartModel,
-      'areaChart' => $this->areaChartModel,
-      'mesChart' => $this->mesChartModel,
-      'tiemposMuertosChart' => $this->tiemposMuertosChartModel,
-      'esAdmin' => $this->esVistaAdministrador(),
+      'estadoChart'         => $esAdmin ? $this->estadoChart() : null,
+      'areaChart'           => $esAdmin ? $this->areaChart() : null,
+      'mesChart'            => $esAdmin ? $this->mesChart() : null,
+      'tiemposMuertosChart' => $esAdmin ? $this->tiemposMuertosChart() : null,
+      'esAdmin'             => $esAdmin,
     ]);
   }
 }
