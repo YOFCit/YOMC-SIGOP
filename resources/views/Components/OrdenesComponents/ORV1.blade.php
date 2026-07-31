@@ -246,15 +246,6 @@
           <label class="form-check-label small fw-semibold" for="paroLinea">¿Hubo paro de línea?</label>
         </div>
 
-        @if($ParoLinea)
-        <div class="mb-3">
-          <label class="form-label fw-semibold small">Tiempo muerto (minutos) <span class="text-danger">*</span></label>
-          <input type="number" class="form-control rounded-3 @error('TiempoMuerto') is-invalid @enderror"
-            wire:model="TiempoMuerto" placeholder="Minutos" min="0">
-          @error('TiempoMuerto') <div class="invalid-feedback small">{{ $message }}</div> @enderror
-        </div>
-        @endif
-
         {{-- Materiales --}}
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="reqMaterial" wire:model.live="ReqMaterial">

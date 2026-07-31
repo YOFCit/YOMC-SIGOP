@@ -1,7 +1,7 @@
 <div>
 
   {{-- BARRA SUPERIOR --}}
-  <div class="bg-white border-bottom px-4 py-3 sticky-top shadow-sm">
+  <div class="bg-white border-bottom px-4 py-3 shadow-sm">
     <div class="d-flex align-items-center justify-content-between">
       <div class="d-flex align-items-center gap-3">
         <div class="bg-primary rounded-3 p-2 text-white d-flex align-items-center justify-content-center" style="width: 42px; height: 42px;">

@@ -22,7 +22,6 @@ return new class extends Migration
 
       // Paro de línea
       $table->boolean('ParoLinea')->default(false);
-      $table->integer('TiempoMuerto')->nullable();
       $table->datetime('TiempoSolucion')->nullable();
 
       // Responsables

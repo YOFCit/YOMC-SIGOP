@@ -117,7 +117,122 @@
   </footer>
 
   <script src="{{ asset('js/bootstrap.bundle.min.js') }}"></script>
+
   @livewireScripts
+
+  <script>
+    let globalVersion = null;
+    let checking = false;
+
+    async function checkGlobalUpdates() {
+
+      if (checking) return;
+
+      checking = true;
+
+      try {
+
+        const response = await fetch(
+          "{{ route('global.refresh.check') }}", {
+            cache: 'no-store',
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json'
+            }
+          }
+        );
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        // Primera carga
+        if (globalVersion === null) {
+          globalVersion = data.version;
+
+          console.log(
+            '🌐 Versión inicial:',
+            globalVersion
+          );
+
+          return;
+        }
+
+        // No hay cambios
+        if (data.version === globalVersion) {
+          return;
+        }
+
+        // ==========================
+        // CAMBIO DETECTADO
+        // ==========================
+
+        console.log(
+          '🔄 Cambio detectado:',
+          globalVersion,
+          '→',
+          data.version
+        );
+
+        globalVersion = data.version;
+
+        // ==========================
+        // FORZAR REFRESH LIVEWIRE
+        // ==========================
+
+        if (typeof Livewire !== 'undefined') {
+
+          const components = Livewire.all();
+
+          console.log(
+            '⚡ Forzando refresh de',
+            components.length,
+            'componentes'
+          );
+
+          components.forEach(component => {
+
+            try {
+
+              // Esto equivale a pedirle a Livewire
+              // que vuelva a renderizar el componente
+              component.$wire.$refresh();
+
+            } catch (error) {
+
+              console.error(
+                'Error actualizando componente:',
+                error
+              );
+
+            }
+
+          });
+
+        }
+
+      } catch (error) {
+
+        console.error(
+          '❌ Error:',
+          error
+        );
+
+      } finally {
+
+        checking = false;
+
+      }
+    }
+
+    // Revisar cada 3 segundos
+    setInterval(checkGlobalUpdates, 3000);
+
+    // Primera comprobación
+    checkGlobalUpdates();
+  </script>
+
+  @livewireChartsScripts
   @livewireChartsScripts
 </body>
 

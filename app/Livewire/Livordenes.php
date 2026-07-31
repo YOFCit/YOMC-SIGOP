@@ -66,7 +66,6 @@ class Livordenes extends Component
   // --- Campos de mantenimiento ---
   public $Procedimiento;
   public $ParoLinea = false;
-  public $TiempoMuerto = 0;
   public $TiempoSolucion = null;
   public $ReqMaterial = false;
   public $Status = 'abierta';
@@ -279,7 +278,6 @@ class Livordenes extends Component
       'en_proceso'         => (clone $base)->where('Status', 'en_proceso')->count(),
       'cerradas'           => (clone $base)->where('Status', 'cerrada')->count(),
       'con_paro'           => (clone $base)->where('ParoLinea', 1)->count(),
-      'tiempo_total_muerto' => (clone $base)->sum('TiempoMuerto'),
     ];
   }
 
@@ -345,7 +343,7 @@ class Livordenes extends Component
     // ============================================================
 
   /**
-   * Calcular tiempo de solución (HoraApertura -> TiempoSolucion + TiempoMuerto)
+   * Calcular tiempo de solución (HoraApertura -> TiempoSolucion)
    */
   public function calcularTiempoSolucion($orden): string
   {
@@ -361,7 +359,7 @@ class Livordenes extends Component
         return 'Fecha inválida';
       }
 
-      $minutosTotales = $inicio->diffInMinutes($fin) + (int) ($orden->TiempoMuerto ?? 0);
+      $minutosTotales = $inicio->diffInMinutes($fin);
       return $this->formatearMinutos($minutosTotales);
     } catch (\Exception $e) {
       return 'Error en cálculo';
@@ -616,7 +614,6 @@ class Livordenes extends Component
         'Tipo'           => $this->Tipo,
         'Otro'           => $this->Tipo === 'Otro' ? $this->Otro : null,
         'ParoLinea'      => $this->ParoLinea ? 1 : 0,
-        'TiempoMuerto'   => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
         'ReqMaterial'    => $this->ReqMaterial ? 1 : 0,
         'Status'         => 'cerrada',
         'HoraCierre'     => now(),
@@ -694,7 +691,6 @@ class Livordenes extends Component
       $data = [
         'Procedimiento'  => $this->Procedimiento,
         'ParoLinea'      => $this->ParoLinea ? 1 : 0,
-        'TiempoMuerto'   => $this->ParoLinea ? ($this->TiempoMuerto ?? 0) : 0,
         'TiempoSolucion' => $this->TiempoSolucion ? Carbon::parse($this->TiempoSolucion) : null,
         'ReqMaterial'    => $this->ReqMaterial ? 1 : 0,
         'Status'         => $this->Status,
@@ -795,7 +791,7 @@ class Livordenes extends Component
         throw new \Exception('Esta orden ya tiene arranque aprobado');
       }
     } elseif ($departamento === 'Mantenimiento') {
-      if ($orden->Status !== 'abierta') {
+      if ($orden->Status !== 'abierta' && $orden->Status !== 'en_proceso') {
         throw new \Exception('Solo puedes cerrar órdenes abiertas');
       }
     }
@@ -815,7 +811,7 @@ class Livordenes extends Component
     $this->lineaNombre     = $orden->linea?->Nombre ?? 'N/A';
     $this->NombreEmpleado  = $orden->empleado?->Nombre ?? 'N/A';
     $this->NumeroEmpleado  = $orden->NumeroEmpleado;
-    $this->Maquina         = $orden->Maquina; // Cargar ANTES de actualizar dependencias
+    $this->Maquina         = $orden->Maquina;
     $this->HoraApertura    = $orden->HoraApertura ? Carbon::parse($orden->HoraApertura)->format('Y-m-d\TH:i') : null;
     $this->Status          = $orden->Status;
     $this->HoraCierre      = $orden->HoraCierre ? Carbon::parse($orden->HoraCierre)->format('Y-m-d\TH:i') : null;
@@ -828,7 +824,6 @@ class Livordenes extends Component
   {
     $this->Procedimiento = $orden->Procedimiento;
     $this->ParoLinea     = (bool) $orden->ParoLinea;
-    $this->TiempoMuerto  = $orden->TiempoMuerto ?? 0;
     $this->ReqMaterial   = (bool) $orden->ReqMaterial;
     $this->Tipo          = $orden->Tipo ?? 'correctivo';
     $this->Otro          = $orden->Otro ?? '';
@@ -878,10 +873,6 @@ class Livordenes extends Component
 
     if ($this->Tipo === 'Otro') {
       $rules['Otro'] = 'required|string|max:255';
-    }
-
-    if ($this->ParoLinea) {
-      $rules['TiempoMuerto'] = 'required|integer|min:0';
     }
 
     $this->validate($rules);
@@ -944,7 +935,6 @@ class Livordenes extends Component
     $template->setValue('descripcion', $orden->Descripcion ?? '');
     $template->setValue('Procedimiento', $orden->Procedimiento ?? '');
     $template->setValue('TiempoSolucionCalculado', $this->calcularTiempoSolucion($orden));
-    $template->setValue('TiempoMuerto', $orden->TiempoMuerto ?? 0);
 
     // Fechas
     $template->setValue('HoraApertura', $orden->HoraApertura ? Carbon::parse($orden->HoraApertura)->format('d/m/Y H:i') : '');
@@ -1019,7 +1009,6 @@ class Livordenes extends Component
       'Folio',
       'Descripcion',
       'Procedimiento',
-      'TiempoMuerto',
       'TiempoSolucion',
       'NumeroEmpleado',
       'Maquina',
@@ -1089,8 +1078,8 @@ class Livordenes extends Component
       return;
     }
 
+    // Si se desactiva el paro, limpiar TiempoSolucion
     if (!$value) {
-      $this->TiempoMuerto = 0;
       $this->TiempoSolucion = null;
     }
   }

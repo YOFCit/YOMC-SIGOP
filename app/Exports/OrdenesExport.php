@@ -11,7 +11,6 @@ use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
-use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -22,15 +21,13 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 
   public function columnFormats(): array
   {
-    return [
-      'N' => NumberFormat::FORMAT_NUMBER, // Tiempo muerto como número
-    ];
+    return [];
   }
 
   public function columnWidths(): array
   {
     return [
-      'A' => 20,  // Folio - AUMENTADO para evitar ####
+      'A' => 20,  // Folio
       'B' => 15,  // Estado
       'C' => 15,  // Tipo
       'D' => 18,  // Área
@@ -43,15 +40,14 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
       'K' => 22,  // Hora cierre
       'L' => 22,  // Hora recepción línea
       'M' => 22,  // Hora arranque
-      'N' => 20,  // Tiempo muerto (min)
-      'O' => 20,  // Tiempo solución
-      'P' => 25,  // Tiempo espera
-      'Q' => 25,  // Tiempo arranque
-      'R' => 22,  // Tiempo total
-      'S' => 45,  // Descripción
-      'T' => 45,  // Procedimiento
-      'U' => 45,  // Descripción arranque
-      'V' => 50,  // Materiales
+      'N' => 20,  // Tiempo solución
+      'O' => 25,  // Tiempo espera
+      'P' => 25,  // Tiempo arranque
+      'Q' => 22,  // Tiempo total
+      'R' => 45,  // Descripción
+      'S' => 45,  // Procedimiento
+      'T' => 45,  // Descripción arranque
+      'U' => 50,  // Materiales
     ];
   }
 
@@ -81,7 +77,6 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
       'Hora cierre',
       'Hora recepción línea',
       'Hora arranque',
-      'Tiempo muerto (min)',
       'Tiempo solución',
       'Tiempo espera (recepción - apertura)',
       'Tiempo arranque (arranque - recepción)',
@@ -99,10 +94,19 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
     $tiempoSolucionMinutos = $this->calcularTiempoSolucionMinutos($orden);
     $tiempoEsperaMinutos = $this->calcularTiempoEsperaMinutos($orden);
     $tiempoArranqueMinutos = $this->calcularTiempoArranqueMinutos($orden);
-    $tiempoMuertoMinutos = (int)($orden->TiempoMuerto ?? 0);
 
-    // Tiempo total = suma de todos los tiempos
-    $tiempoTotalMinutos = ($tiempoSolucionMinutos-$tiempoMuertoMinutos)   + $tiempoEsperaMinutos + $tiempoArranqueMinutos;
+    /*
+         * Tiempo total:
+         *
+         * Tiempo solución + Tiempo espera + Tiempo arranque
+         *
+         * Ya no se descuenta TiempoMuerto porque ese campo
+         * ya no forma parte del reporte.
+         */
+    $tiempoTotalMinutos =
+      $tiempoSolucionMinutos +
+      $tiempoEsperaMinutos +
+      $tiempoArranqueMinutos;
 
     return [
       (int) $orden->Folio,
@@ -113,19 +117,24 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
       $orden->Maquina,
       $orden->empleado->Nombre ?? '',
       $orden->NumeroEmpleado,
+
+      // ParoLinea ahora es únicamente Sí / No
       $orden->ParoLinea ? 'Sí' : 'No',
+
       optional($orden->HoraApertura)->format('d/m/Y H:i:s'),
       optional($orden->HoraCierre)->format('d/m/Y H:i:s'),
       optional($orden->HoraRecepcionLinea)->format('d/m/Y H:i:s'),
       optional($orden->HoraArranque)->format('d/m/Y H:i:s'),
-      $tiempoMuertoMinutos,
+
       $this->formatearTiempo($tiempoSolucionMinutos),
       $this->formatearTiempo($tiempoEsperaMinutos),
       $this->formatearTiempo($tiempoArranqueMinutos),
       $this->formatearTiempo($tiempoTotalMinutos),
+
       $orden->Descripcion ?? '',
       $orden->Procedimiento ?? '',
       $orden->DescripcionArranque ?? '',
+
       $orden->movimientos
         ->map(fn($m) => $m->material->Nombre . ' (' . $m->CantidadUsada . ')')
         ->implode(', ')
@@ -133,7 +142,7 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
   }
 
   /**
-   * Calcular tiempo de solución en minutos (SIN tiempo muerto)
+   * Calcular tiempo de solución en minutos
    */
   private function calcularTiempoSolucionMinutos($orden)
   {
@@ -185,6 +194,7 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
     if ($arranque->lt($recepcion)) {
       return 0;
     }
+
     return $recepcion->diffInMinutes($arranque);
   }
 
@@ -199,32 +209,38 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 
     $dias = intdiv($minutos, 1440);
     $minutos %= 1440;
+
     $horas = intdiv($minutos, 60);
     $minutos %= 60;
 
     $partes = [];
+
     if ($dias > 0) {
       $partes[] = $dias . ' día' . ($dias > 1 ? 's' : '');
     }
+
     if ($horas > 0) {
       $partes[] = $horas . ' hora' . ($horas > 1 ? 's' : '');
     }
+
     if ($minutos > 0) {
       $partes[] = $minutos . ' minuto' . ($minutos > 1 ? 's' : '');
     }
 
-    return empty($partes) ? '0 minutos' : implode(', ', $partes);
+    return empty($partes)
+      ? '0 minutos'
+      : implode(', ', $partes);
   }
 
   public function styles(Worksheet $sheet)
   {
-    // Obtener la última fila y columna
     $highestRow = $sheet->getHighestRow();
     $highestColumn = $sheet->getHighestColumn();
 
-    // ===================== ESTILOS =====================
+    // =====================
+    // 1. ENCABEZADOS
+    // =====================
 
-    // 1. ESTILO PARA ENCABEZADOS (Fila 1) - CON BORDES
     $sheet->getStyle('A1:' . $highestColumn . '1')->applyFromArray([
       'font' => [
         'bold' => true,
@@ -249,7 +265,10 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
       ]
     ]);
 
-    // 2. ESTILO PARA TODOS LOS DATOS - SIN BORDES
+    // =====================
+    // 2. DATOS
+    // =====================
+
     $sheet->getStyle('A2:' . $highestColumn . $highestRow)->applyFromArray([
       'font' => [
         'name' => 'Calibri',
@@ -259,57 +278,54 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
         'vertical' => Alignment::VERTICAL_CENTER,
         'wrapText' => true
       ]
-      // BORDES ELIMINADOS
     ]);
 
-    // 3. ALINEACIÓN ESPECÍFICA POR COLUMNAS
-    // Folio (A) - alineado a la derecha
+    // =====================
+    // 3. ALINEACIONES
+    // =====================
+
+    // Folio
     $sheet->getStyle('A2:A' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_RIGHT
       ]
     ]);
 
-    // Estado, Tipo, Paro línea (B, C, I) - centrado
+    // Estado, Tipo y Paro línea
     $sheet->getStyle('B2:B' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_CENTER
       ]
     ]);
+
     $sheet->getStyle('C2:C' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_CENTER
       ]
     ]);
+
     $sheet->getStyle('I2:I' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_CENTER
       ]
     ]);
 
-    // Fechas (J, K, L, M) - centrado
+    // Fechas
     $sheet->getStyle('J2:M' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_CENTER
       ]
     ]);
 
-    // Tiempo muerto (N) - centrado
-    $sheet->getStyle('N2:N' . $highestRow)->applyFromArray([
-      'alignment' => [
-        'horizontal' => Alignment::HORIZONTAL_CENTER
-      ]
-    ]);
-
-    // Tiempos (O, P, Q, R) - alineado a la izquierda
-    $sheet->getStyle('O2:R' . $highestRow)->applyFromArray([
+    // Tiempos
+    $sheet->getStyle('N2:Q' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_LEFT
       ]
     ]);
 
-    // Descripciones (S, T, U, V) - con wrap y expansión hacia abajo
-    $sheet->getStyle('S2:V' . $highestRow)->applyFromArray([
+    // Descripciones y materiales
+    $sheet->getStyle('R2:U' . $highestRow)->applyFromArray([
       'alignment' => [
         'horizontal' => Alignment::HORIZONTAL_LEFT,
         'vertical' => Alignment::VERTICAL_TOP,
@@ -317,17 +333,21 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
       ]
     ]);
 
+    // =====================
     // 4. ALTURA DE FILAS
-    // Altura para encabezados
+    // =====================
+
     $sheet->getRowDimension(1)->setRowHeight(60);
 
-    // Autoajuste de altura para todas las filas de datos
     for ($row = 2; $row <= $highestRow; $row++) {
       $sheet->getRowDimension($row)->setRowHeight(-1);
     }
 
-    // 5. ANCHO DE COLUMNAS - FOLIO AUMENTADO
-    $sheet->getColumnDimension('A')->setWidth(20); // Aumentado de 15 a 20
+    // =====================
+    // 5. ANCHO DE COLUMNAS
+    // =====================
+
+    $sheet->getColumnDimension('A')->setWidth(20);
     $sheet->getColumnDimension('B')->setWidth(18);
     $sheet->getColumnDimension('C')->setWidth(18);
     $sheet->getColumnDimension('D')->setWidth(22);
@@ -341,23 +361,26 @@ class OrdenesExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
     $sheet->getColumnDimension('L')->setWidth(26);
     $sheet->getColumnDimension('M')->setWidth(26);
     $sheet->getColumnDimension('N')->setWidth(24);
-    $sheet->getColumnDimension('O')->setWidth(24);
+    $sheet->getColumnDimension('O')->setWidth(30);
     $sheet->getColumnDimension('P')->setWidth(30);
-    $sheet->getColumnDimension('Q')->setWidth(30);
-    $sheet->getColumnDimension('R')->setWidth(26);
+    $sheet->getColumnDimension('Q')->setWidth(26);
+    $sheet->getColumnDimension('R')->setWidth(50);
     $sheet->getColumnDimension('S')->setWidth(50);
     $sheet->getColumnDimension('T')->setWidth(50);
-    $sheet->getColumnDimension('U')->setWidth(50);
-    $sheet->getColumnDimension('V')->setWidth(55);
+    $sheet->getColumnDimension('U')->setWidth(55);
 
+    // =====================
     // 6. CONGELAR PANEL
+    // =====================
+
     $sheet->freezePane('A2');
 
-    // 7. FORMATO DE NÚMEROS
-    // Folio como número sin decimales
-    $sheet->getStyle('A2:A' . $highestRow)->getNumberFormat()->setFormatCode('0');
+    // =====================
+    // 7. FORMATO DE FOLIO
+    // =====================
 
-    // Tiempo muerto como número sin decimales
-    $sheet->getStyle('N2:N' . $highestRow)->getNumberFormat()->setFormatCode('0');
+    $sheet->getStyle('A2:A' . $highestRow)
+      ->getNumberFormat()
+      ->setFormatCode('0');
   }
 }

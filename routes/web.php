@@ -11,6 +11,7 @@ use App\Http\Controllers\ControllerTiempoextra;
 use App\Http\Controllers\ControllerTiemposmuertos;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\GlobalRefreshController;
 
 /*
 |--------------------------------------------------------------------------
@@ -33,6 +34,10 @@ Route::get('/Tiempoextra', [ControllerTiempoextra::class, 'index'])->name('Tiemp
 //================================================================//
 //Home
 Route::get('/', [ControllerInicio::class, 'index'])->name('Home');
+//================================================================//
+//Automatically refresh
+Route::get('/global-refresh/check', [GlobalRefreshController::class, 'check'])
+  ->name('global.refresh.check');
 //--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´//
 
 //--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´--´\´//

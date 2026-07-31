@@ -28,7 +28,7 @@
           </h6>
           <div class="d-flex gap-2">
             <button class="btn btn-outline-secondary btn-sm" wire:click="limpiarFiltros">
-              <i class="fas fa-undo me-1"></i>Limpiar
+              <i class="fas fa-undo me-1"></i>Refrescar
             </button>
             @auth
             <button class="btn btn-success btn-sm" wire:click="exportarExcel">
@@ -110,7 +110,7 @@
               <th class="text-center">Tipo</th>
               <th class="text-center">Estado</th>
               <th class="text-center">Paro</th>
-              <th class="text-center">Tiempo solución</th>
+              <th class="text-center">Tiempo de solución</th>
               <th class="text-center pe-4">Acciones</th>
             </tr>
           </thead>
@@ -207,25 +207,19 @@
                 @endif
               </td>
 
-              {{-- Paro --}}
-              <td class="text-center py-3">
-                @if($o->ParoLinea)
-                <span class="badge rounded-pill px-3 py-2"
-                  style="background-color: #fee2e2; color: #991b1b; font-weight: 500;">
-                  <i class="fas fa-stop-circle me-1"></i>{{ $o->TiempoMuerto }} min
-                </span>
-                @else
-                <span class="text-muted" style="font-size: 0.8rem;">
-                  <i class="fas fa-minus-circle"></i>
-                </span>
-                @endif
-              </td>
-
-              {{-- Tiempo solución --}}
+              {{-- Hubo paro --}}
               <td class="text-center py-3">
                 <span class="badge rounded-pill px-3 py-2"
                   style="background-color: #e0f2fe; color: #0369a1; font-weight: 500; font-size: 0.75rem;">
-                  <i class="fas fa-clock me-1"></i>{{ $o->tiempo_solucion_calculado ?? 'N/A' }}
+                  <i class="fas fa-clock me-1"></i>@if ($o->ParoLinea === true) Si @else No @endif
+                </span>
+              </td>
+
+              {{-- Tiempo de solución --}}
+              <td class="text-center py-3">
+                <span class="badge rounded-pill px-3 py-2"
+                  style="background-color: #0369a1; color: #f1e9e9; font-weight: 500;">
+                  <i class="fas fa-stop-circle me-1"></i>{{ \Carbon\Carbon::parse($o->HoraApertura)->diffInMinutes(\Carbon\Carbon::parse($o->TiempoSolucion)) }} minutos
                 </span>
               </td>
 
@@ -264,7 +258,7 @@
                     <i class="fas fa-box"></i>
                   </button>
                   @endif
-                  
+
                   {{-- Exportar PDF --}}
                   @auth
                   @if($puedeExportar)

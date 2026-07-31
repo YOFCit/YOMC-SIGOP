@@ -26,7 +26,6 @@ class Orden extends Model
     'Otro',
     'Procedimiento',
     'ParoLinea',
-    'TiempoMuerto',
     'TiempoSolucion',
     'ReqMaterial',
     // NUEVOS CAMPOS
